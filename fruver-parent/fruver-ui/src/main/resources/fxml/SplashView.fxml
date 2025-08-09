@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?import javafx.scene.layout.VBox?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.ProgressIndicator?>
+<?import javafx.geometry.Pos?>
+
+<VBox xmlns:fx="http://javafx.com/fxml"
+      fx:controller="com.miempresa.fruver.ui.SplashController"
+      alignment="CENTER" spacing="14" prefWidth="560" prefHeight="360"
+      styleClass="splash-root">
+    <Label text="Merca Fruver C.Y.E." styleClass="splash-title"/>
+    <ProgressIndicator fx:id="progress" prefWidth="80" prefHeight="80"/>
+    <Label fx:id="lblStatus" text="Inicializando..." wrapText="true"/>
+</VBox>

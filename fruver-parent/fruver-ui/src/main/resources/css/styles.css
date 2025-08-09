@@ -1,0 +1,139 @@
+.root {
+    -fx-font-family: "Inter", "Roboto", "System";
+    -fx-background-color: #FFF8E1;
+    -fx-text-fill: #2E2E2E;
+}
+
+/* Splash */
+.splash-title {
+    -fx-font-size: 46px;
+    -fx-text-fill: #2E7D32;
+    -fx-font-weight: bold;
+}
+
+/* App title on login */
+.app-title {
+    -fx-font-size: 28px;
+    -fx-text-fill: #2E7D32;
+    -fx-font-weight: 600;
+}
+
+/* Buttons */
+.button {
+    -fx-background-radius: 8px;
+    -fx-padding: 12 18;
+    -fx-font-size: 16px;
+    -fx-background-color: linear-gradient(#A5D6A7, #8FCB8F);
+    -fx-text-fill: #2E2E2E;
+}
+
+/* Top bar */
+.topbar {
+    -fx-background-color: #2E7D32;
+    -fx-padding: 8;
+    -fx-alignment: CENTER_LEFT;
+}
+.topbar .brand {
+    -fx-text-fill: white;
+    -fx-font-size: 18px;
+    -fx-font-weight: bold;
+}
+
+.welcome-label {
+    -fx-font-size: 22px;
+    -fx-text-fill: #2E2E2E;
+}
+
+.version-label {
+    -fx-text-fill: #7a7a7a;
+}
+/* user list */
+.user-list {
+    -fx-background-color: transparent;
+    -fx-padding: 6;
+}
+
+/* login-card */
+.login-card {
+    -fx-background-color: white;
+    -fx-padding: 24;
+    -fx-border-radius: 12;
+    -fx-background-radius: 12;
+    -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.12), 12, 0.0, 0, 6);
+    -fx-alignment: center;
+}
+
+/* primary button */
+.primary-button {
+    -fx-background-color: linear-gradient(#66BB6A, #43A047);
+    -fx-text-fill: white;
+    -fx-pref-height: 40;
+    -fx-font-weight: 600;
+    -fx-padding: 10 16;
+    -fx-background-radius: 8;
+}
+/* ---------------------------
+   User tiles (Login list)
+   --------------------------- */
+
+/* El ListCell recibe la clase user-tile-cell */
+.list-cell.user-tile-cell {
+    -fx-background-color: transparent;   /* dejamos el fondo al contenedor interno */
+    -fx-padding: 6 8;                    /* separación externa entre celdas */
+}
+
+/* El HBox interno tiene la clase user-tile-root */
+.list-cell.user-tile-cell .user-tile-root {
+    -fx-background-color: white;
+    -fx-background-radius: 10;
+    -fx-padding: 12;
+    -fx-alignment: center-left;
+    -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.12), 10, 0.0, 0, 6);
+    -fx-border-radius: 10;
+    -fx-border-color: #E6F4EA; /* borde sutil */
+    -fx-border-width: 1;
+}
+
+/* Hover: ligerísimo cambio para retroalimentación táctil */
+.list-cell.user-tile-cell:hover .user-tile-root {
+    -fx-background-color: linear-gradient(#F7FFF6, #FFFFFF);
+    -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.14), 12, 0.0, 0, 8);
+}
+
+/* Estado seleccionado: verde principal */
+.list-cell.user-tile-cell:selected .user-tile-root,
+.list-view:focused .list-cell.user-tile-cell:selected .user-tile-root {
+    -fx-background-color: linear-gradient(#2E7D32, #1B5E20);
+    -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.18), 12, 0.0, 0, 10);
+    -fx-border-color: transparent;
+}
+
+/* Textos en estado normal */
+.user-tile-name {
+    -fx-font-size: 15px;
+    -fx-font-weight: 600;
+    -fx-text-fill: #2E2E2E;
+}
+.user-tile-role {
+    -fx-font-size: 12px;
+    -fx-text-fill: #7A7A7A;
+}
+
+/* Textos cuando la celda está seleccionada: forzamos blanco para contraste */
+.list-cell.user-tile-cell:selected .user-tile-name,
+.list-cell.user-tile-cell:selected .user-tile-role {
+    -fx-text-fill: white;
+}
+
+/* Avatar: pequeño margen a la izquierda para equilibrar */
+.list-cell.user-tile-cell .image-view {
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.08), 6, 0.0, 0, 2);
+}
+
+/* Ajustes responsivos: en pantallas pequeñas, hacer tiles más altos */
+@media screen and (max-width: 800px) {
+    .list-cell.user-tile-cell .user-tile-root {
+        -fx-padding: 14;
+    }
+    .user-tile-name { -fx-font-size: 16px; }
+}

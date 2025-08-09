@@ -1,0 +1,80 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.miempresa.fruver</groupId>
+        <artifactId>fruver-parent</artifactId>
+        <version>1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>fruver-ui</artifactId>
+    <packaging>jar</packaging>
+
+    <properties>
+        <javafx.version>21.0.1</javafx.version>
+        <javafx.platform>win</javafx.platform> <!-- cambiar si no estás en Windows -->
+        <maven.compiler.release>17</maven.compiler.release> <!-- ó 21 si quieres -->
+    </properties>
+
+    <dependencies>
+        <!-- JavaFX (usa classifier por plataforma para obtener los native libs) -->
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-controls</artifactId>
+            <version>${javafx.version}</version>
+            <classifier>${javafx.platform}</classifier>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-fxml</artifactId>
+            <version>${javafx.version}</version>
+            <classifier>${javafx.platform}</classifier>
+        </dependency>
+
+        <!-- dependencia interna a infra (tu código) -->
+        <dependency>
+            <groupId>com.miempresa.fruver</groupId>
+            <artifactId>fruver-infra</artifactId>
+            <version>1.0-SNAPSHOT</version>
+        </dependency>
+        <dependency>
+            <groupId>com.miempresa.fruver</groupId>
+            <artifactId>fruver-service</artifactId>
+            <version>1.0-SNAPSHOT</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.mindrot</groupId>
+            <artifactId>jbcrypt</artifactId>
+            <version>0.4</version>
+        </dependency>
+
+        <!-- (opcional) si necesitas más módulos javafx, agrégalos con classifier -->
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- JavaFX Maven plugin para facilitar ejecución -->
+            <plugin>
+                <groupId>org.openjfx</groupId>
+                <artifactId>javafx-maven-plugin</artifactId>
+                <version>0.0.8</version>
+                <configuration>
+                    <mainClass>com.miempresa.fruver.ui.MainApp</mainClass>
+                </configuration>
+            </plugin>
+
+            <!-- Asegura la compilación con la versión del compilador deseada -->
+            <plugin>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+                <configuration>
+                    <release>${maven.compiler.release}</release>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

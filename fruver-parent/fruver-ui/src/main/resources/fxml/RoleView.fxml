@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+
+<BorderPane xmlns:fx="http://javafx.com/fxml" fx:controller="com.miempresa.fruver.ui.RoleController">
+    <top>
+        <HBox spacing="12" padding="10" styleClass="topbar">
+            <Label text="Merca Fruver C.Y.E." styleClass="brand"/>
+            <Region HBox.hgrow="ALWAYS"/>
+            <Label fx:id="lblUser" />
+            <Button fx:id="btnLogout" text="Salir"/>
+        </HBox>
+    </top>
+    <center>
+        <StackPane>
+            <Label fx:id="lblWelcome" styleClass="welcome-label"/>
+        </StackPane>
+    </center>
+</BorderPane>
