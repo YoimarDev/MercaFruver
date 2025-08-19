@@ -9,13 +9,21 @@ import javafx.concurrent.Task;
 import javafx.fxml.FXML;
 import javafx.scene.control.*;
 import javafx.scene.control.cell.TextFieldListCell;
+import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
+import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
+import javafx.geometry.Pos;
+import javafx.scene.paint.Color;
+import javafx.scene.shape.Circle;
+import javafx.scene.text.Font;
 
 import java.util.Optional;
 
 /**
  * Controller para la vista Admin.
- * - no implementa backup (solicitado), sólo limpieza y gestión de configs + indicadores + espacio DB.
+ * - gestiona configuración de dispositivos y gestión de usuarios.
+ * - mejoras visuales: cellFactory amigable, notificaciones no intrusivas.
  */
 public class AdminController {
 
@@ -39,6 +47,19 @@ public class AdminController {
     @FXML private Label lblStatus;
     @FXML private Label lblScaleStatus;
     @FXML private Label lblReaderStatus;
+
+    // --- Usuarios UI controls (nuevos)
+    @FXML private ListView<Usuario> lvUsers;
+    @FXML private TextField txtUserName;
+    @FXML private ComboBox<String> cbUserRole;
+    @FXML private PasswordField txtUserPassword;
+    @FXML private Button btnCreateUser;
+    @FXML private Button btnUpdateUser;
+    @FXML private Button btnDeleteUser;
+    @FXML private Label lblUserStatus;
+
+    // Salir
+    @FXML private Button btnSalir;
 
     private AdminViewModel vm;
     private Usuario currentUser;
@@ -96,7 +117,7 @@ public class AdminController {
         lvConfigs.itemsProperty().bind(vm.configListProperty());
         lvConfigs.setCellFactory(list -> new TextFieldListCell<>());
 
-        // Buttons
+        // Buttons device
         btnTest.setOnAction(e -> testConnection());
         btnSave.setOnAction(e -> saveDeviceConfig());
         btnCleanSales.setOnAction(e -> doCleanSales());
@@ -127,18 +148,16 @@ public class AdminController {
             txtBarcodeTest.setOnAction(e -> {
                 String code = txtBarcodeTest.getText();
                 if (code != null && !code.isBlank()) {
-                    showAlert(Alert.AlertType.INFORMATION, "Código leído", "Código: " + code.trim());
+                    showTransientInfo("Código leído", code.trim());
                     txtBarcodeTest.clear();
 
                     // Guardar LECTOR en modo keyboard (background)
                     new Thread(() -> {
                         try {
-                            // Usa AdminService: su implementación JDBC tolera LECTOR con puerto vacío,
-                            // y la in-memory lo guardará en memoria.
                             ServiceLocator.getAdminService().saveDeviceConfig("LECTOR", "", "{\"mode\":\"keyboard\"}");
                             Platform.runLater(() -> {
                                 vm.refreshConfigs();
-                                showAlert(Alert.AlertType.INFORMATION, "Configuración", "Se guardó LECTOR (keyboard).");
+                                showTransientInfo("Configuración", "Se guardó LECTOR (keyboard).");
                                 refreshIndicatorsBackground();
                             });
                         } catch (Throwable ex) {
@@ -149,19 +168,101 @@ public class AdminController {
             });
         }
 
+        // --- Inicialización usuarios UI ---
+        // roles en combo
+        cbUserRole.getItems().addAll("CAJERO", "SUPERVISOR", "ADMIN");
+
+        // bind lista de usuarios del VM (observable list)
+        lvUsers.setItems(vm.usersProperty().get());
+        vm.usersProperty().addListener((obs, oldV, newV) -> {
+            // no-op (lista ya actualizada por VM)
+        });
+
+        // Mejor cellFactory: avatar + nombre (rol) • id
+        lvUsers.setCellFactory(listView -> new ListCell<>() {
+            private final HBox root = new HBox(10);
+            private final Circle avatar = new Circle(18);
+            private final VBox vbox = new VBox(2);
+            private final Label lblName = new Label();
+            private final Label lblMeta = new Label();
+
+            {
+                root.setAlignment(Pos.CENTER_LEFT);
+                avatar.setFill(Color.web("#A5D6A7"));
+                avatar.setStroke(Color.web("#2E7D32"));
+                lblName.setFont(Font.font(14));
+                lblMeta.setStyle("-fx-font-size:11px; -fx-text-fill: #666;");
+                vbox.getChildren().addAll(lblName, lblMeta);
+                root.getChildren().addAll(avatar, vbox);
+            }
+
+            @Override
+            protected void updateItem(Usuario user, boolean empty) {
+                super.updateItem(user, empty);
+                if (empty || user == null) {
+                    setText(null);
+                    setGraphic(null);
+                } else {
+                    lblName.setText(user.getNombre());
+                    lblMeta.setText(user.getRol().name() + " • id:" + user.getUsuarioId());
+                    setGraphic(root);
+                }
+            }
+        });
+
+        // selection listener para llenar formulario
+        lvUsers.getSelectionModel().selectedItemProperty().addListener((obs, oldU, newU) -> {
+            if (newU != null) {
+                txtUserName.setText(newU.getNombre());
+                cbUserRole.setValue(newU.getRol().name());
+                txtUserPassword.clear(); // por seguridad no mostrar hash
+            } else {
+                txtUserName.clear();
+                cbUserRole.setValue(null);
+                txtUserPassword.clear();
+            }
+        });
+
+        // botones usuarios
+        btnCreateUser.setOnAction(e -> onCreateUser());
+        btnUpdateUser.setOnAction(e -> onUpdateUser());
+        btnDeleteUser.setOnAction(e -> onDeleteUser());
+
+        // bind user status label
+        lblUserStatus.textProperty().bind(vm.userStatusProperty());
+
+        // listener para notificaciones (éxito / error desde VM)
+        vm.lastNotificationProperty().addListener((obs, oldMsg, newMsg) -> {
+            if (newMsg != null && !newMsg.isBlank()) {
+                // Mostrar popup no bloqueante
+                Platform.runLater(() -> {
+                    showTransientInfo("Operación", newMsg);
+                    // limpiar para evitar repetir
+                    vm.lastNotificationProperty().set(null);
+                });
+            }
+        });
+
         // initial tweak and load
         updateFieldsForType(cbDeviceType.getValue());
         loadConfigsBackground();
         fetchDbStorageInfoBackground();
 
-        // bind the indicator labels to VM properties
+        // cargar usuarios
+        vm.loadUsers();
+
+        // bind indicators
         lblScaleStatus.textProperty().bind(vm.scaleStatusProperty());
         lblReaderStatus.textProperty().bind(vm.readerStatusProperty());
 
-        // si estamos en modo demo (in-memory), avisar al admin (para no confundir)
+        // Salir: si se presiona en cualquier vista debe ejecutar onSalir (vuelve al login)
+        if (btnSalir != null) {
+            btnSalir.setOnAction(evt -> onSalir());
+        }
+
+        // si estamos en modo demo (in-memory), avisar al admin
         if (ServiceLocator.isUsingInMemoryAdminService()) {
             vm.setStatus("Atención: modo demo (in-memory) activo — persistencia deshabilitada.");
-            // mostramos aviso modal para que el admin sepa por qué no se persiste.
             Platform.runLater(() -> {
                 Alert a = new Alert(Alert.AlertType.WARNING);
                 a.setTitle("Modo demo (in-memory)");
@@ -172,6 +273,70 @@ public class AdminController {
             });
         }
     }
+
+    /* ------------------ Usuarios handlers ------------------ */
+
+    private void onCreateUser() {
+        String nombre = txtUserName.getText();
+        String rolStr = cbUserRole.getValue();
+        String password = txtUserPassword.getText();
+
+        if (nombre == null || nombre.isBlank()) {
+            showAlert(Alert.AlertType.WARNING, "Validación", "Nombre es obligatorio.");
+            return;
+        }
+        if (rolStr == null || rolStr.isBlank()) {
+            showAlert(Alert.AlertType.WARNING, "Validación", "Selecciona un rol.");
+            return;
+        }
+        if (password == null || password.isBlank()) {
+            showAlert(Alert.AlertType.WARNING, "Validación", "Contraseña es obligatoria.");
+            return;
+        }
+
+        // Ejecutar create en VM (async). VM disparará lastNotification cuando termine.
+        vm.createUser(nombre.trim(), Usuario.Role.valueOf(rolStr), password);
+    }
+
+    private void onUpdateUser() {
+        Usuario sel = lvUsers.getSelectionModel().getSelectedItem();
+        if (sel == null) {
+            showAlert(Alert.AlertType.WARNING, "Validación", "Selecciona un usuario para actualizar.");
+            return;
+        }
+        String nombre = txtUserName.getText();
+        String rolStr = cbUserRole.getValue();
+        String password = txtUserPassword.getText(); // puede estar vacío -> no cambiar
+
+        if (nombre == null || nombre.isBlank()) {
+            showAlert(Alert.AlertType.WARNING, "Validación", "Nombre es obligatorio.");
+            return;
+        }
+        vm.updateUser(sel.getUsuarioId(), nombre.trim(), Usuario.Role.valueOf(rolStr), (password == null || password.isBlank()) ? null : password);
+    }
+
+    private void onDeleteUser() {
+        Usuario sel = lvUsers.getSelectionModel().getSelectedItem();
+        if (sel == null) {
+            showAlert(Alert.AlertType.WARNING, "Validación", "Selecciona un usuario para eliminar.");
+            return;
+        }
+        if (sel.getUsuarioId().equals(currentUser != null ? currentUser.getUsuarioId() : -1)) {
+            showAlert(Alert.AlertType.WARNING, "Acción no permitida", "No puedes eliminar el usuario con sesión activa.");
+            return;
+        }
+
+        Alert conf = new Alert(Alert.AlertType.CONFIRMATION);
+        conf.setTitle("Eliminar usuario");
+        conf.setHeaderText("Confirmar eliminación");
+        conf.setContentText("¿Deseas eliminar al usuario '" + sel.getNombre() + "' (id=" + sel.getUsuarioId() + ")?");
+        Optional<ButtonType> r = conf.showAndWait();
+        if (r.isEmpty() || r.get() != ButtonType.OK) return;
+
+        vm.deleteUser(sel.getUsuarioId());
+    }
+
+    /* ------------------ (resto del controller: dispositivos y limpieza) ------------------ */
 
     private void updateFieldsForType(String tipo) {
         boolean isBasc = "BASCULA".equalsIgnoreCase(tipo);
@@ -194,7 +359,6 @@ public class AdminController {
     }
 
     private void refreshIndicatorsBackground() {
-        // parse configs and test each relevant device
         new Thread(() -> {
             try {
                 for (String repr : vm.getConfigList()) {
@@ -249,7 +413,7 @@ public class AdminController {
                 vm.setReaderStatus(ok ? "Conectada (" + port + ")" : "No conectada", ok);
             }
             if (ok) {
-                showAlert(Alert.AlertType.INFORMATION, "Conexión OK", "Se ha detectado respuesta desde el dispositivo.");
+                showTransientInfo("Conexión OK", "Se ha detectado respuesta desde el dispositivo.");
             } else {
                 showAlert(Alert.AlertType.ERROR, "Conexión", "No se obtuvo respuesta del dispositivo.");
             }
@@ -268,7 +432,6 @@ public class AdminController {
         final String port = txtPort.getText();
         final String params = txtParams.getText();
 
-        // Validaciones: LECTOR permite puerto vacío (keyboard)
         if (!"LECTOR".equalsIgnoreCase(type)) {
             if (port == null || port.isBlank()) {
                 showAlert(Alert.AlertType.WARNING, "Puerto vacío", "Indica el puerto antes de guardar.");
@@ -287,7 +450,6 @@ public class AdminController {
         Task<Void> t = new Task<>() {
             @Override
             protected Void call() {
-                // Delegar a AdminService; su implementación JDBC tolera LECTOR sin puerto
                 ServiceLocator.getAdminService().saveDeviceConfig(type, port == null ? "" : port, params == null ? "{}" : params);
                 return null;
             }
@@ -296,8 +458,7 @@ public class AdminController {
         t.setOnSucceeded(evt -> {
             vm.setStatus("Configuración guardada");
             vm.refreshConfigs();
-            showAlert(Alert.AlertType.INFORMATION, "Guardado", "Configuración guardada correctamente.");
-            // tras guardar, probar conexión automáticamente
+            showTransientInfo("Guardado", "Configuración guardada correctamente.");
             Platform.runLater(() -> testConnection());
         });
 
@@ -388,6 +549,8 @@ public class AdminController {
         new Thread(t, "admin-clean-sales").start();
     }
 
+    /* ------------------ Helpers UI ------------------ */
+
     private void showAlert(Alert.AlertType type, String title, String content) {
         Platform.runLater(() -> {
             Alert a = new Alert(type);
@@ -395,6 +558,28 @@ public class AdminController {
             a.setHeaderText(null);
             a.setContentText(content);
             a.showAndWait();
+        });
+    }
+
+    /**
+     * Muestra un popup no bloqueante e informativo (para éxito o info breve).
+     */
+    private void showTransientInfo(String title, String content) {
+        Platform.runLater(() -> {
+            Alert a = new Alert(Alert.AlertType.INFORMATION);
+            a.setTitle(title);
+            a.setHeaderText(null);
+            a.setContentText(content);
+            a.initOwner(lblTitle.getScene() == null ? null : lblTitle.getScene().getWindow());
+            // no-blocking
+            a.show();
+            // opcional: auto-close después de X ms (no nativo en Alert) -> se puede cerrar manualmente en background
+            new Thread(() -> {
+                try {
+                    Thread.sleep(2200);
+                    Platform.runLater(a::close);
+                } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+            }, "transient-close").start();
         });
     }
 

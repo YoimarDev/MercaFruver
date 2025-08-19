@@ -1,42 +1,30 @@
+/* -----------------------------------------------------------
+   FRUVER UI - styles.css
+   Paleta: oliva / menta / crema
+   Mantener comportamiento: sólo estilos visuales
+   ----------------------------------------------------------- */
+
+/* Root */
 .root {
     -fx-font-family: "Inter", "Roboto", "System";
-    -fx-background-color: #FFF8E1;
+    -fx-background-color: #FFF8E1; /* crema */
     -fx-text-fill: #2E2E2E;
+    -fx-font-size: 13px;
 }
 
-/* Splash */
+/* -----------------------
+   Tipografías / títulos
+   ----------------------- */
 .splash-title {
     -fx-font-size: 46px;
     -fx-text-fill: #2E7D32;
     -fx-font-weight: bold;
 }
 
-/* App title on login */
 .app-title {
     -fx-font-size: 28px;
     -fx-text-fill: #2E7D32;
     -fx-font-weight: 600;
-}
-
-/* Buttons */
-.button {
-    -fx-background-radius: 8px;
-    -fx-padding: 12 18;
-    -fx-font-size: 16px;
-    -fx-background-color: linear-gradient(#A5D6A7, #8FCB8F);
-    -fx-text-fill: #2E2E2E;
-}
-
-/* Top bar */
-.topbar {
-    -fx-background-color: #2E7D32;
-    -fx-padding: 8;
-    -fx-alignment: CENTER_LEFT;
-}
-.topbar .brand {
-    -fx-text-fill: white;
-    -fx-font-size: 18px;
-    -fx-font-weight: bold;
 }
 
 .welcome-label {
@@ -47,68 +35,132 @@
 .version-label {
     -fx-text-fill: #7a7a7a;
 }
-/* user list */
-.user-list {
-    -fx-background-color: transparent;
-    -fx-padding: 6;
+
+/* -----------------------
+   Topbar
+   ----------------------- */
+.topbar {
+    -fx-background-color: linear-gradient(#245E23, #2E7D32); /* sutil degradado */
+    -fx-padding: 10;
+    -fx-alignment: CENTER_LEFT;
+    -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.08), 8, 0.0, 0, 3);
+}
+.topbar .brand {
+    -fx-text-fill: white;
+    -fx-font-size: 18px;
+    -fx-font-weight: bold;
 }
 
-/* login-card */
-.login-card {
+/* -----------------------
+   Formularios / tarjetas
+   ----------------------- */
+.login-card, .card {
     -fx-background-color: white;
-    -fx-padding: 24;
+    -fx-padding: 20;
     -fx-border-radius: 12;
     -fx-background-radius: 12;
-    -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.12), 12, 0.0, 0, 6);
-    -fx-alignment: center;
+    -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.08), 12, 0.0, 0, 6);
 }
 
-/* primary button */
+/* Inputs estilo */
+.text-field, .password-field, .combo-box, .text-area {
+    -fx-background-color: white;
+    -fx-background-radius: 8;
+    -fx-border-radius: 8;
+    -fx-border-color: rgba(46,46,46,0.08);
+    -fx-border-width: 1;
+    -fx-padding: 8 10;
+    -fx-focus-color: #A5D6A7;
+    -fx-faint-focus-color: transparent;
+}
+
+/* Placeholder / prompt */
+.text-field .text, .password-field .text {
+    -fx-fill: #2E2E2E;
+}
+
+/* -----------------------
+   Botones
+   ----------------------- */
+.button {
+    -fx-background-radius: 8px;
+    -fx-padding: 10 16;
+    -fx-font-size: 14px;
+    -fx-cursor: hand;
+    -fx-border-width: 0;
+    -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.04), 6, 0.0, 0, 2);
+    -fx-text-fill: #ffffff;
+}
+
+/* Primary */
 .primary-button {
     -fx-background-color: linear-gradient(#66BB6A, #43A047);
     -fx-text-fill: white;
     -fx-pref-height: 40;
-    -fx-font-weight: 600;
-    -fx-padding: 10 16;
-    -fx-background-radius: 8;
+    -fx-font-weight: 700;
+    -fx-padding: 8 16;
+    -fx-background-radius: 10;
 }
-/* ---------------------------
-   User tiles (Login list)
-   --------------------------- */
+.primary-button:hover { -fx-opacity: 0.95; -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.08), 10, 0.0, 0, 4); }
+.primary-button:disabled { -fx-opacity: 0.6; -fx-cursor: default; }
 
-/* El ListCell recibe la clase user-tile-cell */
-.list-cell.user-tile-cell {
-    -fx-background-color: transparent;   /* dejamos el fondo al contenedor interno */
-    -fx-padding: 6 8;                    /* separación externa entre celdas */
+/* Danger */
+.danger-button {
+    -fx-background-color: linear-gradient(#F0625F, #E53935);
+    -fx-text-fill: white;
+    -fx-font-weight: 700;
+    -fx-background-radius: 10;
+}
+.danger-button:hover { -fx-opacity: 0.95; }
+
+/* Secondary / ghost */
+.ghost-button {
+    -fx-background-color: transparent;
+    -fx-border-color: rgba(46,46,46,0.08);
+    -fx-border-radius: 8;
+    -fx-text-fill: #2E2E2E;
 }
 
-/* El HBox interno tiene la clase user-tile-root */
-.list-cell.user-tile-cell .user-tile-root {
+/* Icon buttons small */
+.icon-button {
+    -fx-background-color: transparent;
+    -fx-padding: 6;
+}
+
+/* -----------------------
+   List / User tiles
+   ----------------------- */
+/* Default list cell style */
+.list-cell {
+    -fx-padding: 6 6;
+}
+
+/* Tile container */
+.user-tile-root {
     -fx-background-color: white;
     -fx-background-radius: 10;
     -fx-padding: 12;
     -fx-alignment: center-left;
-    -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.12), 10, 0.0, 0, 6);
-    -fx-border-radius: 10;
-    -fx-border-color: #E6F4EA; /* borde sutil */
+    -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.08), 10, 0.0, 0, 6);
+    -fx-border-color: #E6F4EA;
     -fx-border-width: 1;
 }
 
-/* Hover: ligerísimo cambio para retroalimentación táctil */
-.list-cell.user-tile-cell:hover .user-tile-root {
+/* Hover subtle */
+.list-cell:hover .user-tile-root {
     -fx-background-color: linear-gradient(#F7FFF6, #FFFFFF);
-    -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.14), 12, 0.0, 0, 8);
+    -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.10), 12, 0.0, 0, 8);
 }
 
-/* Estado seleccionado: verde principal */
-.list-cell.user-tile-cell:selected .user-tile-root,
-.list-view:focused .list-cell.user-tile-cell:selected .user-tile-root {
+/* Selected */
+.list-cell:filled:selected .user-tile-root,
+.list-cell:selected .user-tile-root {
     -fx-background-color: linear-gradient(#2E7D32, #1B5E20);
-    -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.18), 12, 0.0, 0, 10);
+    -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.16), 12, 0.0, 0, 10);
     -fx-border-color: transparent;
 }
 
-/* Textos en estado normal */
+/* Name / role */
 .user-tile-name {
     -fx-font-size: 15px;
     -fx-font-weight: 600;
@@ -119,21 +171,90 @@
     -fx-text-fill: #7A7A7A;
 }
 
-/* Textos cuando la celda está seleccionada: forzamos blanco para contraste */
-.list-cell.user-tile-cell:selected .user-tile-name,
-.list-cell.user-tile-cell:selected .user-tile-role {
+/* When selected, force white text for contrast */
+.list-cell:filled:selected .user-tile-name,
+.list-cell:selected .user-tile-name,
+.list-cell:filled:selected .user-tile-role,
+.list-cell:selected .user-tile-role {
     -fx-text-fill: white;
 }
 
-/* Avatar: pequeño margen a la izquierda para equilibrar */
-.list-cell.user-tile-cell .image-view {
+/* Avatar style (if using ImageView/Circle) */
+.avatar {
     -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.08), 6, 0.0, 0, 2);
 }
 
-/* Ajustes responsivos: en pantallas pequeñas, hacer tiles más altos */
-@media screen and (max-width: 800px) {
-    .list-cell.user-tile-cell .user-tile-root {
-        -fx-padding: 14;
-    }
-    .user-tile-name { -fx-font-size: 16px; }
+/* -----------------------
+   Device indicators
+   ----------------------- */
+.device-indicator {
+    -fx-font-weight: 700;
+    -fx-text-fill: #2E7D32;
+}
+.device-indicator.off {
+    -fx-text-fill: #B00020; /* rojo suave */
+}
+
+/* -----------------------
+   Progress / statuses
+   ----------------------- */
+.progress-bar {
+    -fx-accent: #66BB6A;
+}
+.label-status {
+    -fx-font-weight: 600;
+}
+
+/* -----------------------
+   Tooltips
+   ----------------------- */
+.tooltip {
+    -fx-background-color: white;
+    -fx-text-fill: #2E2E2E;
+    -fx-border-color: rgba(46,46,46,0.06);
+    -fx-background-radius: 6;
+    -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.06), 8, 0.0, 0, 3);
+}
+
+/* -----------------------
+   Small-screen responsive tweaks
+   ----------------------- */
+@media screen and (max-width: 900px) {
+    .topbar { -fx-padding: 8; }
+    .user-tile-name { -fx-font-size: 14px; }
+    .primary-button { -fx-pref-height: 44; }
+}
+
+/* -----------------------
+   Optional: toast notifications (modern, no alerts)
+   - Requiere un contenedor en Scene (StackPane with id "toastContainer")
+   - Si no lo usas, estos estilos no afectan nada.
+   ----------------------- */
+.toast-container {
+    -fx-pref-width: 320px;
+    -fx-pref-height: 0;
+    -fx-padding: 12;
+    -fx-alignment: top-right;
+    -fx-translate-y: 12;
+}
+
+.toast {
+    -fx-background-color: rgba(46,125,50,0.95);
+    -fx-text-fill: white;
+    -fx-padding: 10 14;
+    -fx-background-radius: 10;
+    -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.12), 12, 0.0, 0, 6);
+    -fx-font-weight: 600;
+    -fx-opacity: 0.98;
+    -fx-margin: 6;
+}
+.toast.error {
+    -fx-background-color: rgba(229,57,53,0.96);
+}
+
+/* -----------------------
+   Accessibility
+   ----------------------- */
+:focused {
+    -fx-focus-color: #A5D6A7;
 }

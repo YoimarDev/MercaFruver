@@ -15,7 +15,8 @@
             </padding>
             <Label fx:id="lblTitle" styleClass="brand"/>
             <Region HBox.hgrow="ALWAYS"/>
-            <Button text="Salir" onAction="#onSalir" visible="false"/>
+            <!-- Botón salir visible en todas las vistas (ADMIN, SUPERVISOR, CAJERO) -->
+            <Button fx:id="btnSalir" text="Salir" onAction="#onSalir" styleClass="primary-button" minWidth="120"/>
         </HBox>
     </top>
 
@@ -24,59 +25,117 @@
         <SplitPane orientation="HORIZONTAL" dividerPositions="0.50">
             <items>
 
-                <!-- Panel izquierdo: Configuración de dispositivos -->
-                <VBox spacing="12" prefWidth="520">
-                    <padding>
-                        <Insets top="12" right="12" bottom="12" left="12"/>
-                    </padding>
+                <!-- Panel izquierdo: TabPane con Dispositivos y Usuarios -->
+                <TabPane prefWidth="520">
+                    <tabs>
+                        <!-- Tab: Dispositivos (contenedor original) -->
+                        <Tab text="Dispositivos" closable="false">
+                            <content>
+                                <VBox spacing="12" prefWidth="520">
+                                    <padding>
+                                        <Insets top="12" right="12" bottom="12" left="12"/>
+                                    </padding>
 
-                    <Label text="Configuración de Dispositivos" style="-fx-font-size:18px; -fx-font-weight:600;"/>
+                                    <Label text="Configuración de Dispositivos" style="-fx-font-size:18px; -fx-font-weight:600;"/>
 
-                    <GridPane hgap="8" vgap="8">
-                        <columnConstraints>
-                            <ColumnConstraints percentWidth="30"/>
-                            <ColumnConstraints percentWidth="70"/>
-                        </columnConstraints>
+                                    <GridPane hgap="8" vgap="8">
+                                        <columnConstraints>
+                                            <ColumnConstraints percentWidth="30"/>
+                                            <ColumnConstraints percentWidth="70"/>
+                                        </columnConstraints>
 
-                        <Label text="Tipo:" GridPane.rowIndex="0" GridPane.columnIndex="0"/>
-                        <ComboBox fx:id="cbDeviceType" GridPane.rowIndex="0" GridPane.columnIndex="1"/>
+                                        <Label text="Tipo:" GridPane.rowIndex="0" GridPane.columnIndex="0"/>
+                                        <ComboBox fx:id="cbDeviceType" GridPane.rowIndex="0" GridPane.columnIndex="1"/>
 
-                        <Label text="Puerto:" GridPane.rowIndex="1" GridPane.columnIndex="0"/>
-                        <HBox spacing="8" GridPane.rowIndex="1" GridPane.columnIndex="1">
-                            <ComboBox fx:id="cbAvailablePorts" prefWidth="200"/>
-                            <TextField fx:id="txtPort" promptText="COM1 / /dev/ttyS0" HBox.hgrow="ALWAYS"/>
-                        </HBox>
+                                        <Label text="Puerto:" GridPane.rowIndex="1" GridPane.columnIndex="0"/>
+                                        <HBox spacing="8" GridPane.rowIndex="1" GridPane.columnIndex="1">
+                                            <ComboBox fx:id="cbAvailablePorts" prefWidth="200"/>
+                                            <TextField fx:id="txtPort" promptText="COM1 / /dev/ttyS0" HBox.hgrow="ALWAYS"/>
+                                        </HBox>
 
-                        <Label text="Parámetros (JSON):" GridPane.rowIndex="2" GridPane.columnIndex="0"/>
-                        <TextArea fx:id="txtParams"
-                                  GridPane.rowIndex="2" GridPane.columnIndex="1"
-                                  prefRowCount="4"
-                                  promptText='{"baudRate":9600,"dataBits":8,"parity":"NONE"}'/>
+                                        <Label text="Parámetros (JSON):" GridPane.rowIndex="2" GridPane.columnIndex="0"/>
+                                        <TextArea fx:id="txtParams"
+                                                  GridPane.rowIndex="2" GridPane.columnIndex="1"
+                                                  prefRowCount="4"
+                                                  promptText='{"baudRate":9600,"dataBits":8,"parity":"NONE"}'/>
 
-                        <Label text="Probar lector (enfoca y escanea):" GridPane.rowIndex="3" GridPane.columnIndex="0"/>
-                        <TextField fx:id="txtBarcodeTest" GridPane.rowIndex="3" GridPane.columnIndex="1" promptText="Escanea aquí para probar lector">
-                            <tooltip>
-                                <Tooltip text="Escanea aquí para comprobar el lector en modo keyboard. Al detectar, se guardará la configuración LECTOR (keyboard)."/>
-                            </tooltip>
-                        </TextField>
-                    </GridPane>
+                                        <Label text="Probar lector (enfoca y escanea):" GridPane.rowIndex="3" GridPane.columnIndex="0"/>
+                                        <TextField fx:id="txtBarcodeTest" GridPane.rowIndex="3" GridPane.columnIndex="1" promptText="Escanea aquí para probar lector">
+                                            <tooltip>
+                                                <Tooltip text="Escanea aquí para comprobar el lector en modo keyboard. Al detectar, se guardará la configuración LECTOR (keyboard)."/>
+                                            </tooltip>
+                                        </TextField>
+                                    </GridPane>
 
-                    <HBox spacing="10" alignment="CENTER_LEFT">
-                        <Button fx:id="btnTest" text="Probar conexión" styleClass="primary-button" minWidth="160"/>
-                        <Button fx:id="btnSave" text="Guardar configuración" styleClass="primary-button" minWidth="180"/>
-                    </HBox>
+                                    <HBox spacing="10" alignment="CENTER_LEFT">
+                                        <Button fx:id="btnTest" text="Probar conexión" styleClass="primary-button" minWidth="160"/>
+                                        <Button fx:id="btnSave" text="Guardar configuración" styleClass="primary-button" minWidth="180"/>
+                                    </HBox>
 
-                    <Label text="Configuraciones actuales:" style="-fx-font-weight:600;"/>
-                    <ListView fx:id="lvConfigs" prefHeight="220" editable="false">
-                        <tooltip>
-                            <Tooltip text="Doble clic para cargar la configuración en los campos de edición"/>
-                        </tooltip>
-                    </ListView>
+                                    <Label text="Configuraciones actuales:" style="-fx-font-weight:600;"/>
+                                    <ListView fx:id="lvConfigs" prefHeight="220" editable="false">
+                                        <tooltip>
+                                            <Tooltip text="Doble clic para cargar la configuración en los campos de edición"/>
+                                        </tooltip>
+                                    </ListView>
 
-                    <Label fx:id="lblStatus" wrapText="true"/>
-                </VBox>
+                                    <Label fx:id="lblStatus" wrapText="true"/>
+                                </VBox>
+                            </content>
+                        </Tab>
 
-                <!-- Panel derecho: Mantenimiento de BD + indicadores -->
+                        <!-- Tab: Usuarios -->
+                        <Tab text="Usuarios" closable="false">
+                            <content>
+                                <VBox spacing="12" prefWidth="520">
+                                    <padding>
+                                        <Insets top="12" right="12" bottom="12" left="12"/>
+                                    </padding>
+
+                                    <Label text="Gestión de Usuarios" style="-fx-font-size:18px; -fx-font-weight:600;"/>
+
+                                    <HBox spacing="12">
+                                        <!-- Lista de usuarios -->
+                                        <VBox spacing="6" prefWidth="260">
+                                            <Label text="Usuarios registrados:"/>
+                                            <ListView fx:id="lvUsers" prefHeight="260" />
+                                        </VBox>
+
+                                        <!-- Form para crear/editar -->
+                                        <VBox spacing="8" prefWidth="240">
+                                            <Label text="Detalles del usuario:"/>
+                                            <GridPane hgap="8" vgap="8">
+                                                <columnConstraints>
+                                                    <ColumnConstraints percentWidth="35"/>
+                                                    <ColumnConstraints percentWidth="65"/>
+                                                </columnConstraints>
+
+                                                <Label text="Nombre:" GridPane.rowIndex="0" GridPane.columnIndex="0"/>
+                                                <TextField fx:id="txtUserName" GridPane.rowIndex="0" GridPane.columnIndex="1"/>
+
+                                                <Label text="Rol:" GridPane.rowIndex="1" GridPane.columnIndex="0"/>
+                                                <ComboBox fx:id="cbUserRole" GridPane.rowIndex="1" GridPane.columnIndex="1"/>
+
+                                                <Label text="Contraseña:" GridPane.rowIndex="2" GridPane.columnIndex="0"/>
+                                                <PasswordField fx:id="txtUserPassword" GridPane.rowIndex="2" GridPane.columnIndex="1" promptText="Nueva contraseña"/>
+                                            </GridPane>
+
+                                            <HBox spacing="8">
+                                                <Button fx:id="btnCreateUser" text="Crear" styleClass="primary-button" minWidth="80"/>
+                                                <Button fx:id="btnUpdateUser" text="Actualizar" styleClass="primary-button" minWidth="80"/>
+                                                <Button fx:id="btnDeleteUser" text="Eliminar" styleClass="danger-button" minWidth="80"/>
+                                            </HBox>
+                                        </VBox>
+                                    </HBox>
+
+                                    <Label fx:id="lblUserStatus" wrapText="true"/>
+                                </VBox>
+                            </content>
+                        </Tab>
+                    </tabs>
+                </TabPane>
+
+                <!-- Panel derecho: Mantenimiento de BD + indicadores (sin cambios) -->
                 <VBox spacing="12">
                     <padding>
                         <Insets top="12" right="12" bottom="12" left="12"/>

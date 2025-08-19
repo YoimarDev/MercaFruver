@@ -9,6 +9,11 @@ import com.miempresa.fruver.service.usecase.GetDatabaseStorageUseCase;
 import com.miempresa.fruver.service.usecase.ListUsersUseCase;
 import com.miempresa.fruver.service.usecase.LoginUseCase;
 import com.miempresa.fruver.service.usecase.SaveDeviceConfigUseCase;
+
+import com.miempresa.fruver.service.usecase.CreateUserUseCase;
+import com.miempresa.fruver.service.usecase.UpdateUserUseCase;
+import com.miempresa.fruver.service.usecase.DeleteUserUseCase;
+
 import org.mindrot.jbcrypt.BCrypt;
 
 import javax.sql.DataSource;
@@ -22,7 +27,7 @@ import java.util.function.Consumer;
 
 /**
  * ServiceLocator consolidado:
- * - inicializa Login/ListUsers (JDBC o in-memory)
+ * - inicializa Login/ListUsers/Create/Update/Delete (JDBC o in-memory)
  * - expone AdminService (JdbcAdminService cuando hay DataSource; InMemoryAdminService fallback)
  *
  * Nota: esta versión NO implementa backup (performBackup) por petición del cliente.
@@ -31,6 +36,11 @@ public final class ServiceLocator {
 
     private static volatile LoginUseCase loginUseCase;
     private static volatile ListUsersUseCase listUsersUseCase;
+
+    // user management usecases
+    private static volatile CreateUserUseCase createUserUseCase;
+    private static volatile UpdateUserUseCase updateUserUseCase;
+    private static volatile DeleteUserUseCase deleteUserUseCase;
 
     // Admin service (stubs / fallback)
     private static volatile AdminService adminService;
@@ -63,8 +73,12 @@ public final class ServiceLocator {
             progressMsg.accept("Construyendo casos de uso...");
             progressPercent.accept(0.40);
 
+            // Usecases core de autenticación / usuarios
             loginUseCase = new LoginUseCase(repoJdbc);
             listUsersUseCase = new ListUsersUseCase(repoJdbc);
+            createUserUseCase = new CreateUserUseCase(repoJdbc);
+            updateUserUseCase = new UpdateUserUseCase(repoJdbc);
+            deleteUserUseCase = new DeleteUserUseCase(repoJdbc);
 
             progressMsg.accept("Probando consulta mínima a BD...");
             progressPercent.accept(0.60);
@@ -83,8 +97,15 @@ public final class ServiceLocator {
             try {
                 com.miempresa.fruver.infra.db.DeviceConfigRepositoryJdbc deviceRepo =
                         new com.miempresa.fruver.infra.db.DeviceConfigRepositoryJdbc(ds);
-                com.miempresa.fruver.infra.db.DatabaseRepositoryJdbc dbRepo =
-                        new com.miempresa.fruver.infra.db.DatabaseRepositoryJdbc(ds);
+
+                // DatabaseRepositoryJdbc puede ser opcional: si no existe, se intenta crear un JdbcAdminService "parcial".
+                com.miempresa.fruver.infra.db.DatabaseRepositoryJdbc dbRepo = null;
+                try {
+                    dbRepo = new com.miempresa.fruver.infra.db.DatabaseRepositoryJdbc(ds);
+                } catch (Throwable dbEx) {
+                    // log y continuar; algunas funcionalidades de AdminService estarán limitadas (e.g. getDatabaseStorageInfo)
+                    System.err.println("[ServiceLocator] DatabaseRepositoryJdbc no disponible: " + dbEx.getClass().getSimpleName() + " - " + dbEx.getMessage());
+                }
 
                 adminService = new JdbcAdminService(deviceRepo, dbRepo, ds);
                 usingInMemoryAdminService = false;
@@ -98,8 +119,10 @@ public final class ServiceLocator {
                 t.printStackTrace();
                 usingInMemoryAdminService = true;
                 adminService = new InMemoryAdminService();
+                // En este punto, los usecases de usuario ya fueron inicializados por repoJdbc más arriba,
+                // por tanto la gestión de usuarios persistirá aunque adminService sea in-memory (separación de responsabilidades).
                 progressMsg.accept("No se pudo inicializar AdminService JDBC: " + t.getClass().getSimpleName() + " - " + t.getMessage());
-                progressMsg.accept("Modo DEMO (in-memory) activado. Algunas operaciones no serán persistentes.");
+                progressMsg.accept("Modo DEMO (in-memory) activado. Algunas operaciones en AdminService no serán persistentes.");
                 System.out.println("[ServiceLocator] Fallback AdminService inicializado: " + adminService.getClass().getName());
             }
 
@@ -135,6 +158,11 @@ public final class ServiceLocator {
         loginUseCase = new LoginUseCase(inmem);
         listUsersUseCase = new ListUsersUseCase(inmem);
 
+        // inicializar los usecases de gestión de usuarios basados en el repo in-memory
+        createUserUseCase = new CreateUserUseCase(inmem);
+        updateUserUseCase = new UpdateUserUseCase(inmem);
+        deleteUserUseCase = new DeleteUserUseCase(inmem);
+
         // inicializar adminService in-memory también para que la UI admin funcione
         usingInMemoryAdminService = true;
         adminService = new InMemoryAdminService();
@@ -157,6 +185,27 @@ public final class ServiceLocator {
             throw new IllegalStateException("ServiceLocator no inicializado. Llama a initializeAndTestDb primero.");
         }
         return listUsersUseCase;
+    }
+
+    public static CreateUserUseCase getCreateUserUseCase() {
+        if (createUserUseCase == null) {
+            throw new IllegalStateException("ServiceLocator no inicializado. Llama a initializeAndTestDb primero.");
+        }
+        return createUserUseCase;
+    }
+
+    public static UpdateUserUseCase getUpdateUserUseCase() {
+        if (updateUserUseCase == null) {
+            throw new IllegalStateException("ServiceLocator no inicializado. Llama a initializeAndTestDb primero.");
+        }
+        return updateUserUseCase;
+    }
+
+    public static DeleteUserUseCase getDeleteUserUseCase() {
+        if (deleteUserUseCase == null) {
+            throw new IllegalStateException("ServiceLocator no inicializado. Llama a initializeAndTestDb primero.");
+        }
+        return deleteUserUseCase;
     }
 
     /* ----------------------
@@ -190,13 +239,13 @@ public final class ServiceLocator {
     }
 
     /**
-     * Implementación JDBC de AdminService (usa DeviceConfigRepositoryJdbc y DatabaseRepositoryJdbc).
+     * Implementación JDBC de AdminService (usa DeviceConfigRepositoryJdbc y opcionalmente DatabaseRepositoryJdbc).
      * Esta versión NO implementa backup (performBackup).
      */
     private static class JdbcAdminService implements AdminService {
 
         private final com.miempresa.fruver.infra.db.DeviceConfigRepositoryJdbc deviceRepo;
-        private final com.miempresa.fruver.infra.db.DatabaseRepositoryJdbc dbRepo;
+        private final com.miempresa.fruver.infra.db.DatabaseRepositoryJdbc dbRepo; // puede ser null si no disponible
         private final DataSource ds;
 
         public JdbcAdminService(com.miempresa.fruver.infra.db.DeviceConfigRepositoryJdbc deviceRepo,
@@ -435,6 +484,10 @@ public final class ServiceLocator {
         @Override
         public DatabaseStorageInfo getDatabaseStorageInfo() {
             try {
+                if (dbRepo == null) {
+                    System.err.println("[JdbcAdminService] DatabaseRepositoryJdbc no disponible - getDatabaseStorageInfo retorna null.");
+                    return null;
+                }
                 return new GetDatabaseStorageUseCase(dbRepo).execute();
             } catch (Throwable t) {
                 // si falla, retornamos null para que la UI lo maneje

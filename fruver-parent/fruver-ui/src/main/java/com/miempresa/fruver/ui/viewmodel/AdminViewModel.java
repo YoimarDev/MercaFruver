@@ -1,5 +1,12 @@
 package com.miempresa.fruver.ui.viewmodel;
 
+import com.miempresa.fruver.domain.model.Usuario;
+import com.miempresa.fruver.service.port.CreateUserRequest;
+import com.miempresa.fruver.service.port.UpdateUserRequest;
+import com.miempresa.fruver.service.usecase.CreateUserUseCase;
+import com.miempresa.fruver.service.usecase.DeleteUserUseCase;
+import com.miempresa.fruver.service.usecase.ListUsersUseCase;
+import com.miempresa.fruver.service.usecase.UpdateUserUseCase;
 import com.miempresa.fruver.ui.ServiceLocator;
 import javafx.application.Platform;
 import javafx.beans.property.*;
@@ -8,11 +15,15 @@ import javafx.collections.ObservableList;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * ViewModel para AdminController
  * - Actualizaciones de propiedades en FX thread (safe)
- * - expone operaciones síncronas usadas por el controller.
+ * - expone operaciones para configuración de dispositivos y gestión de usuarios.
+ *
+ * Mejoras:
+ * - lastNotificationProperty: notifica eventos de éxito/fracaso para mostrar alertas desde el controller.
  */
 public class AdminViewModel {
 
@@ -28,10 +39,43 @@ public class AdminViewModel {
 
     private final StringProperty cleanupMessage = new SimpleStringProperty();
 
+    // Usuarios
+    private final ListProperty<Usuario> users = new SimpleListProperty<>(FXCollections.observableArrayList());
+    private final ObjectProperty<Usuario> selectedUser = new SimpleObjectProperty<>();
+    private final StringProperty userStatus = new SimpleStringProperty();
+
+    // Indicadores de dispositivos
+    private final StringProperty scaleStatus = new SimpleStringProperty("Desconocido");
+    private final StringProperty readerStatus = new SimpleStringProperty("Desconocido");
+
+    // Notificaciones (para que Controller muestre popups)
+    private final StringProperty lastNotification = new SimpleStringProperty();
+
     private final ServiceLocator.AdminService adminService;
+
+    // usecases (pueden ser nulos en modo in-memory)
+    private final ListUsersUseCase listUsersUseCase;
+    private final CreateUserUseCase createUserUseCase;
+    private final UpdateUserUseCase updateUserUseCase;
+    private final DeleteUserUseCase deleteUserUseCase;
 
     public AdminViewModel(ServiceLocator.AdminService adminService) {
         this.adminService = Objects.requireNonNull(adminService);
+
+        // intentar obtener usecases desde ServiceLocator (pueden lanzar si no inicializado)
+        ListUsersUseCase lu = null;
+        CreateUserUseCase cu = null;
+        UpdateUserUseCase uu = null;
+        DeleteUserUseCase du = null;
+        try { lu = ServiceLocator.getListUsersUseCase(); } catch (Throwable ignored) {}
+        try { cu = ServiceLocator.getCreateUserUseCase(); } catch (Throwable ignored) {}
+        try { uu = ServiceLocator.getUpdateUserUseCase(); } catch (Throwable ignored) {}
+        try { du = ServiceLocator.getDeleteUserUseCase(); } catch (Throwable ignored) {}
+
+        this.listUsersUseCase = lu;
+        this.createUserUseCase = cu;
+        this.updateUserUseCase = uu;
+        this.deleteUserUseCase = du;
     }
 
     /* ---------------------
@@ -49,22 +93,32 @@ public class AdminViewModel {
 
     public StringProperty cleanupMessageProperty() { return cleanupMessage; }
 
+    // Usuarios properties
+    public ListProperty<Usuario> usersProperty() { return users; }
+    public ObjectProperty<Usuario> selectedUserProperty() { return selectedUser; }
+    public StringProperty userStatusProperty() { return userStatus; }
+
+    // Indicadores
+    public StringProperty scaleStatusProperty() { return scaleStatus; }
+    public StringProperty readerStatusProperty() { return readerStatus; }
+
+    // Notificaciones para Controller
+    public StringProperty lastNotificationProperty() { return lastNotification; }
+
     /* ---------------------
        Simple getters
        --------------------- */
     public javafx.collections.ObservableList<String> getAvailablePorts() { return availablePorts.get(); }
     public javafx.collections.ObservableList<String> getConfigList() { return configList.get(); }
+    public javafx.collections.ObservableList<Usuario> getUsers() { return users.get(); }
+    public Optional<Usuario> getSelectedUser() { return Optional.ofNullable(selectedUser.get()); }
 
     /* ---------------------
        Utility / actions
        --------------------- */
 
-    /**
-     * Descubre puertos usando adminService y actualiza la lista observable (EN FX THREAD).
-     */
     public List<String> discoverPorts() {
         List<String> ports = adminService.listAvailablePorts();
-        // actualizar en FX thread
         Platform.runLater(() -> {
             try {
                 availablePorts.get().setAll(ports);
@@ -75,15 +129,10 @@ public class AdminViewModel {
         return ports;
     }
 
-    /**
-     * Refresca la lista de configuraciones desde el servicio.
-     * Ejecuta actualizaciones de propiedades en FX thread para evitar excepciones.
-     */
     public void refreshConfigs() {
         setBusy(true);
         try {
             List<String> confs = adminService.listDeviceConfigs();
-            // actualizar observable y status en hilo FX
             Platform.runLater(() -> {
                 try {
                     if (confs == null) {
@@ -98,7 +147,6 @@ public class AdminViewModel {
                 }
             });
         } catch (Throwable t) {
-            // reportar error en hilo FX
             Platform.runLater(() -> {
                 setStatus("Error cargando configuraciones: " + t.getMessage());
                 setBusy(false);
@@ -106,10 +154,6 @@ public class AdminViewModel {
         }
     }
 
-
-    /**
-     * Carga una representación de configuración en los campos editables del VM.
-     */
     public void loadConfigToEditor(String repr) {
         if (repr == null) return;
         String[] parts = repr.split("\\|", 2);
@@ -118,7 +162,6 @@ public class AdminViewModel {
         String[] leftParts = left.split("@", 2);
         String tipo = leftParts.length > 0 ? leftParts[0] : "BASCULA";
         String puerto = leftParts.length > 1 ? leftParts[1] : "";
-        //estas actualizaciones pueden hacerse en cualquier hilo pero normalmente se ejecutan en FX thread desde Controller
         Platform.runLater(() -> {
             type.set(tipo);
             port.set(puerto);
@@ -127,29 +170,143 @@ public class AdminViewModel {
     }
 
     /* ---------------------
-       Small setters used by controller
+       User management (calls to usecases)
        --------------------- */
 
-    public void setStatus(String s) {
-        Platform.runLater(() -> statusMessage.set(s));
+    /** Carga la lista de usuarios desde el usecase (background). */
+    public void loadUsers() {
+        setBusy(true);
+        new Thread(() -> {
+            try {
+                if (listUsersUseCase == null) {
+                    Platform.runLater(() -> {
+                        userStatus.set("ListUsersUseCase no disponible (modo demo?).");
+                        users.get().clear();
+                        setBusy(false);
+                    });
+                    return;
+                }
+                // tu implementación de test usa listUc.execute(null)
+                List<Usuario> list = listUsersUseCase.execute(null);
+                Platform.runLater(() -> {
+                    users.get().setAll(list);
+                    userStatus.set("Usuarios cargados: " + list.size());
+                    setBusy(false);
+                });
+            } catch (Throwable t) {
+                Platform.runLater(() -> {
+                    userStatus.set("Error cargando usuarios: " + t.getMessage());
+                    setBusy(false);
+                });
+            }
+        }, "admin-load-users").start();
     }
+
+    /** Crear usuario (background). */
+    public void createUser(String nombre, Usuario.Role rol, String password) {
+        setBusy(true);
+        new Thread(() -> {
+            try {
+                if (createUserUseCase == null) {
+                    Platform.runLater(() -> {
+                        userStatus.set("CreateUserUseCase no disponible.");
+                        setBusy(false);
+                    });
+                    return;
+                }
+                // CreateUserUseCase espera CreateUserRequest según tu TestUserManagement
+                CreateUserRequest req = new CreateUserRequest(nombre, password, rol);
+                var created = createUserUseCase.execute(req);
+                Platform.runLater(() -> {
+                    String msg = "Usuario creado: " + created.getNombre() + " (id=" + created.getUsuarioId() + ")";
+                    // notificar controller para popup
+                    lastNotification.set(msg);
+                    // actualizar lista y status
+                    loadUsers();
+                    setBusy(false);
+                });
+            } catch (Throwable t) {
+                Platform.runLater(() -> {
+                    lastNotification.set("Error creando usuario: " + t.getMessage());
+                    userStatus.set("Error creando usuario");
+                    setBusy(false);
+                });
+            }
+        }, "admin-create-user").start();
+    }
+
+    /** Actualizar usuario (background). */
+    public void updateUser(Integer usuarioId, String nombre, Usuario.Role rol, String password) {
+        setBusy(true);
+        new Thread(() -> {
+            try {
+                if (updateUserUseCase == null) {
+                    Platform.runLater(() -> {
+                        userStatus.set("UpdateUserUseCase no disponible.");
+                        setBusy(false);
+                    });
+                    return;
+                }
+                // UpdateUserRequest(id, nombre|null, password|null, rol|null)
+                UpdateUserRequest req = new UpdateUserRequest(usuarioId,
+                        (nombre == null || nombre.isBlank()) ? null : nombre,
+                        (password == null || password.isBlank()) ? null : password,
+                        rol);
+                var updated = updateUserUseCase.execute(req);
+                Platform.runLater(() -> {
+                    String msg = "Usuario actualizado: " + updated.getNombre() + " (id=" + updated.getUsuarioId() + ")";
+                    lastNotification.set(msg);
+                    loadUsers();
+                    setBusy(false);
+                });
+            } catch (Throwable t) {
+                Platform.runLater(() -> {
+                    lastNotification.set("Error actualizando usuario: " + t.getMessage());
+                    userStatus.set("Error actualizando usuario");
+                    setBusy(false);
+                });
+            }
+        }, "admin-update-user").start();
+    }
+
+    /** Eliminar usuario (background). */
+    public void deleteUser(Integer usuarioId) {
+        setBusy(true);
+        new Thread(() -> {
+            try {
+                if (deleteUserUseCase == null) {
+                    Platform.runLater(() -> {
+                        userStatus.set("DeleteUserUseCase no disponible.");
+                        setBusy(false);
+                    });
+                    return;
+                }
+                deleteUserUseCase.execute(usuarioId);
+                Platform.runLater(() -> {
+                    String msg = "Usuario eliminado: id=" + usuarioId;
+                    lastNotification.set(msg);
+                    loadUsers();
+                    setBusy(false);
+                });
+            } catch (Throwable t) {
+                Platform.runLater(() -> {
+                    lastNotification.set("Error eliminando usuario: " + t.getMessage());
+                    userStatus.set("Error eliminando usuario");
+                    setBusy(false);
+                });
+            }
+        }, "admin-delete-user").start();
+    }
+
+    /* --------------------- small setters --------------------- */
+    public void setStatus(String s) { Platform.runLater(() -> statusMessage.set(s)); }
     public void setCleanupMessage(String s) { Platform.runLater(() -> cleanupMessage.set(s)); }
     public void setBusy(boolean b) { Platform.runLater(() -> busy.set(b)); }
 
-    // Indicadores para UI (escala/lector)
-    private final StringProperty scaleStatus = new SimpleStringProperty("Desconocido");
-    private final StringProperty readerStatus = new SimpleStringProperty("Desconocido");
-    public StringProperty scaleStatusProperty() { return scaleStatus; }
-    public StringProperty readerStatusProperty() { return readerStatus; }
+    /* ----------------- device indicator helpers ----------------- */
+    public void setScaleStatus(String s, boolean connected) { Platform.runLater(() -> scaleStatus.set(s)); }
+    public void setReaderStatus(String s, boolean connected) { Platform.runLater(() -> readerStatus.set(s)); }
 
-    public void setScaleStatus(String s, boolean connected) {
-        Platform.runLater(() -> scaleStatus.set(s));
-    }
-    public void setReaderStatus(String s, boolean connected) {
-        Platform.runLater(() -> readerStatus.set(s));
-    }
-
-    /* -------------- Helpers to expose DB info to controller ------------- */
     public com.miempresa.fruver.service.port.DatabaseStorageInfo getDatabaseStorageInfo() {
         try {
             return adminService.getDatabaseStorageInfo();
