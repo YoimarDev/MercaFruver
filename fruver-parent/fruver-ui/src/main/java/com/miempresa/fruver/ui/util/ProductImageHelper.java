@@ -5,7 +5,6 @@ import javafx.scene.image.Image;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
-import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
@@ -21,21 +20,22 @@ import java.util.UUID;
 public final class ProductImageHelper {
 
     private static final String IMAGES_DIR = "data/images";
-    private static final String PLACEHOLDER_RESOURCE = "/images/user-placeholder.png"; // ya existe en recursos según spec
+    // Nota: keep placeholder consistent with resources (user-placeholder.png incluido en resources/images/)
+    private static final String PLACEHOLDER_RESOURCE = "/images/user-placeholder.png";
 
     private ProductImageHelper() {}
 
     /**
      * Guarda la imagen proporcionada en la carpeta ./data/images/ con un nombre UUID.
-     * Devuelve la ruta relativa (ej: "data/images/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.png").
+     * Devuelve la ruta relativa (ej: "data/images/uuid.png").
      *
      * @param sourceFile archivo origen (seleccionado por FileChooser)
      * @return ruta relativa donde se guardó la imagen (para persistir en DB)
-     * @throws IOException si ocurre problema al copiar
+     * @throws Exception si ocurre problema al copiar
      */
-    public static String saveImage(File sourceFile) throws IOException {
+    public static String saveImage(File sourceFile) throws Exception {
         if (sourceFile == null) throw new IllegalArgumentException("sourceFile es null");
-        if (!sourceFile.exists()) throw new IOException("Archivo no encontrado: " + sourceFile.getAbsolutePath());
+        if (!sourceFile.exists()) throw new Exception("Archivo no encontrado: " + sourceFile.getAbsolutePath());
 
         String ext = extractExtension(sourceFile.getName());
         if (ext == null || ext.isBlank()) ext = "png";
@@ -46,30 +46,34 @@ public final class ProductImageHelper {
         if (!dir.exists()) {
             boolean ok = dir.mkdirs();
             if (!ok && !dir.exists()) {
-                throw new IOException("No se pudo crear el directorio de imágenes: " + dir.getAbsolutePath());
+                throw new Exception("No se pudo crear el directorio de imágenes: " + dir.getAbsolutePath());
             }
         }
 
         File target = new File(dir, targetFileName);
 
-        // Copiar archivo (con fallback a streams por seguridad)
-        try (InputStream in = new FileInputStream(sourceFile);
-             FileOutputStream out = new FileOutputStream(target)) {
-            byte[] buffer = new byte[8192];
-            int read;
-            while ((read = in.read(buffer)) != -1) {
-                out.write(buffer, 0, read);
+        // Copiar con Files (más robusto que streams en muchos casos)
+        try {
+            Files.copy(sourceFile.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING);
+        } catch (Throwable ex) {
+            // Fallback a streams
+            try (InputStream in = new FileInputStream(sourceFile); FileOutputStream out = new FileOutputStream(target)) {
+                byte[] buffer = new byte[8192];
+                int read;
+                while ((read = in.read(buffer)) != -1) {
+                    out.write(buffer, 0, read);
+                }
+                out.flush();
+            } catch (Throwable inner) {
+                // intentar limpiar si quedó archivo parcial
+                try { Files.deleteIfExists(target.toPath()); } catch (Throwable ignored) {}
+                throw new Exception("Error copiando imagen: " + inner.getMessage(), inner);
             }
-            out.flush();
-        } catch (IOException ex) {
-            // Intentar limpieza si algo quedó a medias
-            try { Files.deleteIfExists(target.toPath()); } catch (Throwable ignored) {}
-            throw ex;
         }
 
-        // Retornar ruta relativa para almacenar en BD
+        // Retornar ruta relativa normalizada para DB
         String relative = IMAGES_DIR + File.separator + targetFileName;
-        return relative.replace('\\', '/'); // normalizar slash para la DB y multiplataforma
+        return relative.replace('\\', '/');
     }
 
     /**
@@ -84,7 +88,6 @@ public final class ProductImageHelper {
             try {
                 File f = new File(path);
                 if (!f.exists()) {
-                    // intentar con path relativo a working dir
                     f = new File(System.getProperty("user.dir"), path);
                 }
                 if (f.exists()) {
@@ -102,8 +105,8 @@ public final class ProductImageHelper {
             }
         } catch (Throwable ignored) {}
 
-        // Último recurso: image vacío (1x1 transparent)
-        return new Image("data:,"); // tiny empty image URI
+        // Último recurso: tiny empty image (1x1 transparent)
+        return new Image("data:,");
     }
 
     /**

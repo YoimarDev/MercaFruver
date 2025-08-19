@@ -9,18 +9,20 @@ import com.miempresa.fruver.service.usecase.GetDatabaseStorageUseCase;
 import com.miempresa.fruver.service.usecase.ListUsersUseCase;
 import com.miempresa.fruver.service.usecase.LoginUseCase;
 import com.miempresa.fruver.service.usecase.SaveDeviceConfigUseCase;
-
 import com.miempresa.fruver.service.usecase.CreateUserUseCase;
 import com.miempresa.fruver.service.usecase.UpdateUserUseCase;
 import com.miempresa.fruver.service.usecase.DeleteUserUseCase;
 
-// --- productos ---
+// productos
 import com.miempresa.fruver.domain.model.Producto;
 import com.miempresa.fruver.domain.repository.ProductoRepository;
 import com.miempresa.fruver.service.usecase.CreateProductUseCase;
 import com.miempresa.fruver.service.usecase.UpdateProductUseCase;
 import com.miempresa.fruver.service.usecase.DeleteProductUseCase;
 import com.miempresa.fruver.service.usecase.ListProductsUseCase;
+
+// estadísticas (usecase conocido)
+import com.miempresa.fruver.service.usecase.ObtenerEstadisticasUseCase;
 
 import org.mindrot.jbcrypt.BCrypt;
 
@@ -29,61 +31,63 @@ import java.math.BigDecimal;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import java.time.LocalDate;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 /**
- * ServiceLocator consolidado:
- * - inicializa Login/ListUsers/Create/Update/Delete (JDBC o in-memory)
- * - expone AdminService (JdbcAdminService cuando hay DataSource; InMemoryAdminService fallback)
+ * ServiceLocator consolidado (versión final).
  *
- * Nota: esta versión NO implementa backup (performBackup) por petición del cliente.
+ * - Inicializa usecases principales (login, usuarios, productos) en modo JDBC o in-memory.
+ * - Intenta crear y registrar ObtenerEstadisticasUseCase automáticamente si encuentra VentaRepositoryJdbc.
+ * - Expone AdminService (JdbcAdminService / InMemoryAdminService).
  */
 public final class ServiceLocator {
 
+    // ----------------- Usecases / singletons -----------------
     private static volatile LoginUseCase loginUseCase;
     private static volatile ListUsersUseCase listUsersUseCase;
-
-    // user management usecases
     private static volatile CreateUserUseCase createUserUseCase;
     private static volatile UpdateUserUseCase updateUserUseCase;
     private static volatile DeleteUserUseCase deleteUserUseCase;
 
-    // product management usecases
+    // Productos
     private static volatile ListProductsUseCase listProductsUseCase;
     private static volatile CreateProductUseCase createProductUseCase;
     private static volatile UpdateProductUseCase updateProductUseCase;
     private static volatile DeleteProductUseCase deleteProductUseCase;
 
-    // Admin service (stubs / fallback)
-    private static volatile AdminService adminService;
+    // Estadísticas (opcional/inyectable)
+    private static volatile ObtenerEstadisticasUseCase obtenerEstadisticasUseCase;
 
-    // Flag para indicar si se está en modo demo (in-memory)
+    // Admin service
+    private static volatile AdminService adminService;
     private static volatile boolean usingInMemoryAdminService = false;
 
     private ServiceLocator() {}
 
-    /* ----------------------
-       Initialization helpers
-       ---------------------- */
+    /* ---------------------- Initialization helpers ---------------------- */
 
     public static boolean initializeAndTestDb(Consumer<String> progress) {
         return initializeAndTestDb(progress, (p) -> {});
     }
 
+    /**
+     * Inicializa DataSource, repositorios y casos de uso principales.
+     * Si algo falla, cae a modo in-memory (demo).
+     */
     public static boolean initializeAndTestDb(Consumer<String> progressMsg, Consumer<Double> progressPercent) {
         try {
             progressMsg.accept("Inicializando DataSource...");
             progressPercent.accept(0.10);
 
             DataSource ds = com.miempresa.fruver.infra.config.DataSourceFactory.getDataSource();
+
             progressMsg.accept("Construyendo UsuarioRepository (JDBC)...");
             progressPercent.accept(0.25);
-
-            com.miempresa.fruver.infra.db.UsuarioRepositoryJdbc repoJdbc =
-                    new com.miempresa.fruver.infra.db.UsuarioRepositoryJdbc(ds);
+            com.miempresa.fruver.infra.db.UsuarioRepositoryJdbc repoJdbc = new com.miempresa.fruver.infra.db.UsuarioRepositoryJdbc(ds);
 
             progressMsg.accept("Construyendo casos de uso...");
             progressPercent.accept(0.40);
@@ -96,9 +100,7 @@ public final class ServiceLocator {
             deleteUserUseCase = new DeleteUserUseCase(repoJdbc);
 
             // --- ProductoRepository (JDBC) y casos de uso de productos ---
-            com.miempresa.fruver.infra.db.ProductoRepositoryJdbc prodRepoJdbc =
-                    new com.miempresa.fruver.infra.db.ProductoRepositoryJdbc(ds);
-
+            com.miempresa.fruver.infra.db.ProductoRepositoryJdbc prodRepoJdbc = new com.miempresa.fruver.infra.db.ProductoRepositoryJdbc(ds);
             listProductsUseCase = new ListProductsUseCase(prodRepoJdbc);
             createProductUseCase = new CreateProductUseCase(prodRepoJdbc);
             updateProductUseCase = new UpdateProductUseCase(prodRepoJdbc);
@@ -117,45 +119,69 @@ public final class ServiceLocator {
             progressMsg.accept("Conexión a BD OK");
             progressPercent.accept(0.80);
 
+            // Intentar construir VentaRepositoryJdbc y registrar ObtenerEstadisticasUseCase automáticamente
+            try {
+                com.miempresa.fruver.infra.db.VentaRepositoryJdbc ventaRepoJdbc = null;
+                try {
+                    ventaRepoJdbc = new com.miempresa.fruver.infra.db.VentaRepositoryJdbc(ds);
+                } catch (Throwable t) {
+                    // no disponible; lo ignoramos (no es fatal)
+                    ventaRepoJdbc = null;
+                }
+                if (ventaRepoJdbc != null) {
+                    try {
+                        obtenerEstadisticasUseCase = new ObtenerEstadisticasUseCase(ventaRepoJdbc);
+                        System.out.println("[ServiceLocator] ObtenerEstadisticasUseCase auto-registrado usando VentaRepositoryJdbc.");
+                    } catch (Throwable t) {
+                        System.err.println("[ServiceLocator] No se pudo crear ObtenerEstadisticasUseCase automáticamente: " + t.getMessage());
+                        obtenerEstadisticasUseCase = null;
+                    }
+                } else {
+                    System.out.println("[ServiceLocator] VentaRepositoryJdbc no presente; ObtenerEstadisticasUseCase no registrado automáticamente.");
+                }
+            } catch (Throwable t) {
+                System.err.println("[ServiceLocator] Error intentando registrar ObtenerEstadisticasUseCase: " + t.getMessage());
+            }
+
             // Construir AdminService JDBC (si las clases infra existen)
             try {
-                com.miempresa.fruver.infra.db.DeviceConfigRepositoryJdbc deviceRepo =
-                        new com.miempresa.fruver.infra.db.DeviceConfigRepositoryJdbc(ds);
+                com.miempresa.fruver.infra.db.DeviceConfigRepositoryJdbc deviceRepo = new com.miempresa.fruver.infra.db.DeviceConfigRepositoryJdbc(ds);
 
-                // DatabaseRepositoryJdbc puede ser opcional: si no existe, se intenta crear un JdbcAdminService "parcial".
                 com.miempresa.fruver.infra.db.DatabaseRepositoryJdbc dbRepo = null;
                 try {
                     dbRepo = new com.miempresa.fruver.infra.db.DatabaseRepositoryJdbc(ds);
                 } catch (Throwable dbEx) {
-                    // log y continuar; algunas funcionalidades de AdminService estarán limitadas (e.g. getDatabaseStorageInfo)
                     System.err.println("[ServiceLocator] DatabaseRepositoryJdbc no disponible: " + dbEx.getClass().getSimpleName() + " - " + dbEx.getMessage());
                 }
 
                 adminService = new JdbcAdminService(deviceRepo, dbRepo, ds);
                 usingInMemoryAdminService = false;
+
                 progressMsg.accept("AdminService (JDBC) listo");
                 progressMsg.accept("AdminService: JDBC inicializado correctamente.");
                 System.out.println("[ServiceLocator] AdminService inicializado: " + adminService.getClass().getName());
+
             } catch (Throwable t) {
-                // Mostrar traza y usar fallback in-memory
+                // Fallback to in-memory admin service
                 System.err.println("[ServiceLocator] No se pudo inicializar AdminService JDBC: " + t.getClass().getName() + " - " + t.getMessage());
-                System.err.println("[ServiceLocator] Recomendación: compila e instala fruver-infra en el local repo (mvn clean install desde el root) y revisa que fruver-ui dependa de fruver-infra en su pom.xml.");
                 t.printStackTrace();
+
                 usingInMemoryAdminService = true;
                 adminService = new InMemoryAdminService();
-                // En este punto, los usecases de usuario ya fueron inicializados por repoJdbc más arriba,
-                // por tanto la gestión de usuarios persistirá aunque adminService sea in-memory (separación de responsabilidades).
-                progressMsg.accept("No se pudo inicializar AdminService JDBC: " + t.getClass().getSimpleName() + " - " + t.getMessage());
+
                 progressMsg.accept("Modo DEMO (in-memory) activado. Algunas operaciones en AdminService no serán persistentes.");
                 System.out.println("[ServiceLocator] Fallback AdminService inicializado: " + adminService.getClass().getName());
             }
 
             progressPercent.accept(1.0);
             return true;
+
         } catch (Throwable t) {
+            // Si falla la inicialización completa, se inicia modo demo in-memory
             progressMsg.accept("No fue posible inicializar BD: " + t.getMessage());
             t.printStackTrace();
             progressPercent.accept(0.0);
+
             progressMsg.accept("Inicializando modo demo (in-memory)...");
             progressPercent.accept(0.15);
             initInMemoryDemo();
@@ -181,32 +207,24 @@ public final class ServiceLocator {
 
         loginUseCase = new LoginUseCase(inmem);
         listUsersUseCase = new ListUsersUseCase(inmem);
-
-        // inicializar los usecases de gestión de usuarios basados en el repo in-memory
         createUserUseCase = new CreateUserUseCase(inmem);
         updateUserUseCase = new UpdateUserUseCase(inmem);
         deleteUserUseCase = new DeleteUserUseCase(inmem);
 
-        // --- productos en memoria para modo demo ---
+        // Productos en memoria
         InMemoryProductoRepository prodMem = new InMemoryProductoRepository();
-
-        // (semilla opcional desactivada para no asumir constructores/campos del dominio)
-        // Si deseas datos demo, puedes guardarlos aquí contra prodMem.save(...)
-
         listProductsUseCase = new ListProductsUseCase(prodMem);
         createProductUseCase = new CreateProductUseCase(prodMem);
         updateProductUseCase = new UpdateProductUseCase(prodMem);
         deleteProductUseCase = new DeleteProductUseCase(prodMem);
 
-        // inicializar adminService in-memory también para que la UI admin funcione
         usingInMemoryAdminService = true;
         adminService = new InMemoryAdminService();
+
         System.out.println("[ServiceLocator] InMemoryAdminService inicializado (modo demo).");
     }
 
-    /* ----------------------
-       Getters para usecases
-       ---------------------- */
+    /* ---------------------- Getters para usecases ---------------------- */
 
     public static LoginUseCase getLoginUseCase() {
         if (loginUseCase == null) {
@@ -272,9 +290,26 @@ public final class ServiceLocator {
         return deleteProductUseCase;
     }
 
-    /* ----------------------
-       AdminService exposure
-       ---------------------- */
+    /**
+     * Getter para ObtenerEstadisticasUseCase.
+     * Si no fue registrado o no pudo auto-crearse, lanza excepción informativa.
+     */
+    public static ObtenerEstadisticasUseCase getObtenerEstadisticasUseCase() {
+        if (obtenerEstadisticasUseCase == null) {
+            throw new IllegalStateException("ObtenerEstadisticasUseCase no registrado. Llama a ServiceLocator.registerObtenerEstadisticasUseCase(...) durante la inicialización o asegúrate de que fruver-infra provea VentaRepositoryJdbc.");
+        }
+        return obtenerEstadisticasUseCase;
+    }
+
+    /**
+     * Permite registrar/inyectar la instancia de ObtenerEstadisticasUseCase
+     * (recomendado hacerlo desde el punto de arranque donde fruver-service está disponible).
+     */
+    public static void registerObtenerEstadisticasUseCase(ObtenerEstadisticasUseCase uc) {
+        obtenerEstadisticasUseCase = uc;
+    }
+
+    /* ---------------------- AdminService exposure ---------------------- */
 
     public interface AdminService {
         List<String> listAvailablePorts();
@@ -282,7 +317,6 @@ public final class ServiceLocator {
         boolean testDeviceConnection(String tipo, String port, Consumer<String> progressMsg, Consumer<Double> progressPercent);
         void saveDeviceConfig(String tipo, String port, String params);
         void cleanSalesData(Consumer<String> progressMsg, Consumer<Double> progressPercent) throws Exception;
-        // utilidad: obtener info espacio db (usado por UI)
         DatabaseStorageInfo getDatabaseStorageInfo();
     }
 
@@ -302,19 +336,13 @@ public final class ServiceLocator {
         return usingInMemoryAdminService;
     }
 
-    /**
-     * Implementación JDBC de AdminService (usa DeviceConfigRepositoryJdbc y opcionalmente DatabaseRepositoryJdbc).
-     * Esta versión NO implementa backup (performBackup).
-     */
+    /* ---------------------- JdbcAdminService (igual que tu versión) ---------------------- */
     private static class JdbcAdminService implements AdminService {
-
         private final com.miempresa.fruver.infra.db.DeviceConfigRepositoryJdbc deviceRepo;
-        private final com.miempresa.fruver.infra.db.DatabaseRepositoryJdbc dbRepo; // puede ser null si no disponible
+        private final com.miempresa.fruver.infra.db.DatabaseRepositoryJdbc dbRepo; // puede ser null
         private final DataSource ds;
 
-        public JdbcAdminService(com.miempresa.fruver.infra.db.DeviceConfigRepositoryJdbc deviceRepo,
-                                com.miempresa.fruver.infra.db.DatabaseRepositoryJdbc dbRepo,
-                                DataSource ds) {
+        public JdbcAdminService(com.miempresa.fruver.infra.db.DeviceConfigRepositoryJdbc deviceRepo, com.miempresa.fruver.infra.db.DatabaseRepositoryJdbc dbRepo, DataSource ds) {
             this.deviceRepo = deviceRepo;
             this.dbRepo = dbRepo;
             this.ds = ds;
@@ -349,15 +377,10 @@ public final class ServiceLocator {
             }
         }
 
-        /**
-         * Test de conexión: intenta usar ScaleService / BarcodeService por reflexión si están disponibles.
-         * Si no están, usa heurística (COM/tty).
-         */
         @Override
         public boolean testDeviceConnection(String tipo, String port, Consumer<String> progressMsg, Consumer<Double> progressPercent) {
             try {
                 if ("BASCULA".equalsIgnoreCase(tipo)) {
-                    // obtener baud si existe config
                     int baud = 9600;
                     try {
                         Optional<DeviceConfig> opt = deviceRepo.findByType(DeviceType.BASCULA);
@@ -367,24 +390,19 @@ public final class ServiceLocator {
                             if (s != null && s.matches("\\d+")) baud = Integer.parseInt(s);
                         }
                     } catch (Throwable ignored) {}
-
                     try {
                         Class<?> cls = Class.forName("com.miempresa.fruver.infra.hardware.scale.ScaleService");
                         Object scaleSvc = cls.getConstructor().newInstance();
                         try {
-                            // intentar abrir y leer
                             try {
                                 java.lang.reflect.Method openM = cls.getMethod("open", String.class, int.class);
                                 openM.invoke(scaleSvc, port, baud);
                             } catch (NoSuchMethodException nsm) {
-                                // si no existe open(String,int) intentamos open(String) o ignoramos
                                 try {
                                     java.lang.reflect.Method openM2 = cls.getMethod("open", String.class);
                                     openM2.invoke(scaleSvc, port);
                                 } catch (NoSuchMethodException ignored) {}
                             }
-
-                            // intentar leer peso por readWeightGrams, readWeightKg o readWeight
                             Object val = null;
                             try {
                                 java.lang.reflect.Method m = cls.getMethod("readWeightGrams");
@@ -400,7 +418,6 @@ public final class ServiceLocator {
                                     } catch (NoSuchMethodException ignored) {}
                                 }
                             }
-
                             if (progressMsg != null) progressMsg.accept("Báscula probada" + (val == null ? "" : " (valor=" + val + ")"));
                             if (progressPercent != null) progressPercent.accept(1.0);
                             return true;
@@ -411,7 +428,6 @@ public final class ServiceLocator {
                             } catch (Throwable ignored) {}
                         }
                     } catch (ClassNotFoundException cnf) {
-                        // no hay infra; fallback heurístico
                         if (progressMsg != null) progressMsg.accept("ScaleService no disponible en classpath (heurística).");
                     } catch (ReflectiveOperationException | RuntimeException ex) {
                         if (progressMsg != null) progressMsg.accept("Error leyendo báscula: " + ex.getMessage());
@@ -419,7 +435,6 @@ public final class ServiceLocator {
                         return false;
                     }
                 } else if ("LECTOR".equalsIgnoreCase(tipo)) {
-                    // si puerto vacío -> keyboard OK
                     if (port == null || port.isBlank()) {
                         if (progressMsg != null) progressMsg.accept("Modo keyboard (sin puerto) detectado.");
                         if (progressPercent != null) progressPercent.accept(1.0);
@@ -429,7 +444,6 @@ public final class ServiceLocator {
                         Class<?> cls = Class.forName("com.miempresa.fruver.infra.hardware.barcode.BarcodeService");
                         Object barcodeSvc = cls.getConstructor().newInstance();
                         try {
-                            // intentar init si existe
                             try {
                                 java.lang.reflect.Method initM = cls.getMethod("init");
                                 initM.invoke(barcodeSvc);
@@ -438,7 +452,10 @@ public final class ServiceLocator {
                             if (progressPercent != null) progressPercent.accept(1.0);
                             return true;
                         } finally {
-                            try { java.lang.reflect.Method closeM = cls.getMethod("close"); closeM.invoke(barcodeSvc); } catch (Throwable ignored) {}
+                            try {
+                                java.lang.reflect.Method closeM = cls.getMethod("close");
+                                closeM.invoke(barcodeSvc);
+                            } catch (Throwable ignored) {}
                         }
                     } catch (ClassNotFoundException cnf) {
                         if (progressMsg != null) progressMsg.accept("BarcodeService no disponible (heurística).");
@@ -449,49 +466,40 @@ public final class ServiceLocator {
                     }
                 }
 
-                // Fallback heurístico final
                 boolean ok = port != null && (port.toUpperCase().contains("COM") || port.contains("tty"));
                 if (progressMsg != null) progressMsg.accept(ok ? "Respuesta recibida (heurística)." : "Sin respuesta (heurística).");
                 if (progressPercent != null) progressPercent.accept(1.0);
                 return ok;
+
             } catch (Throwable t) {
                 if (progressPercent != null) progressPercent.accept(0.0);
                 return false;
             }
         }
 
-        /**
-         * Guarda/actualiza config del dispositivo.
-         * - usa deviceRepo.findByType(...) para ver si hay existente y llama deviceRepo.save(obj) pasando id si existe.
-         *
-         * Implementación: intenta usar el UseCase si es posible, pero tolera LECTOR con puerto vacío (keyboard).
-         */
         @Override
         public void saveDeviceConfig(String tipo, String port, String params) {
             DeviceType dt = DeviceType.valueOf(tipo.toUpperCase());
             String effectiveParams = params == null ? "{}" : params;
             try {
-                // Caso especial: LECTOR puede venir con puerto vacío (keyboard wedge) — repo.save debe tolerarlo.
+                // Caso especial: LECTOR puede venir con puerto vacío (keyboard wedge)
                 if (dt == DeviceType.LECTOR && (port == null || port.isBlank())) {
-                    // usar repo directamente para crear la config con puerto vacío
                     DeviceConfig cfg = new DeviceConfig(null, dt, "", effectiveParams);
                     deviceRepo.save(cfg);
                     System.out.println("[JdbcAdminService] Guardada configuración LECTOR (keyboard) directamente en repo.");
                     return;
                 }
 
-                // Intentar usar el UseCase (fruver-service). Si fruver-service no está en classpath, fallback a deviceRepo.
+                // Intentar usar SaveDeviceConfigUseCase si existe
                 try {
                     SaveDeviceConfigUseCase usecase = new SaveDeviceConfigUseCase(deviceRepo);
                     usecase.execute(tipo, port == null ? "" : port, effectiveParams);
                     System.out.println("[JdbcAdminService] Guardada configuración usando SaveDeviceConfigUseCase.");
                     return;
                 } catch (NoClassDefFoundError | Exception useEx) {
-                    // si falla el usecase por cualquier motivo, caemos a repo.save
                     System.err.println("[JdbcAdminService] SaveDeviceConfigUseCase no disponible o falló: " + useEx.getMessage());
                 }
 
-                // Fallback: comportamiento clásico
                 Optional<DeviceConfig> existOpt = Optional.empty();
                 try {
                     existOpt = deviceRepo.findByType(dt);
@@ -509,6 +517,7 @@ public final class ServiceLocator {
                     DeviceConfig saved = deviceRepo.save(new DeviceConfig(null, dt, port == null ? "" : port, effectiveParams));
                     System.out.println("[JdbcAdminService] Nueva configuración guardada para tipo=" + tipo + " -> id=" + (saved == null ? "null" : saved.getConfigId()));
                 }
+
             } catch (Throwable t) {
                 throw new RuntimeException("Error al persistir configuración: " + t.getMessage(), t);
             }
@@ -521,6 +530,7 @@ public final class ServiceLocator {
                 try (PreparedStatement delItems = c.prepareStatement("DELETE FROM VENTA_ITEM");
                      PreparedStatement delFactura = c.prepareStatement("DELETE FROM FACTURA");
                      PreparedStatement delVenta = c.prepareStatement("DELETE FROM VENTA")) {
+
                     if (progressMsg != null) progressMsg.accept("Eliminando VENTA_ITEM...");
                     int ri = delItems.executeUpdate();
                     if (progressPercent != null) progressPercent.accept(0.33);
@@ -536,6 +546,7 @@ public final class ServiceLocator {
                     c.commit();
                     if (progressMsg != null) progressMsg.accept("Limpieza completada. filas: items=" + ri + ", fact=" + rf + ", ventas=" + rv);
                     if (progressPercent != null) progressPercent.accept(1.0);
+
                 } catch (SQLException ex) {
                     c.rollback();
                     throw ex;
@@ -554,24 +565,17 @@ public final class ServiceLocator {
                 }
                 return new GetDatabaseStorageUseCase(dbRepo).execute();
             } catch (Throwable t) {
-                // si falla, retornamos null para que la UI lo maneje
                 System.err.println("[JdbcAdminService] getDatabaseStorageInfo falló: " + t.getMessage());
                 return null;
             }
         }
     }
 
-    /* ---------------------------
-       In-memory AdminService (fallback)
-       --------------------------- */
-
+    /* --------------------------- In-memory AdminService (fallback) --------------------------- */
     private static class InMemoryAdminService implements AdminService {
-
         private final Map<String, String> configs = new LinkedHashMap<>();
 
         public InMemoryAdminService() {
-            // Notar: no seed por defecto. Evitamos mostrar configuraciones "falsas".
-            // Para pruebas locales explícitas se puede pasar -Dfruver.demo.seed=true
             String demoSeed = System.getProperty("fruver.demo.seed");
             if ("true".equalsIgnoreCase(demoSeed)) {
                 configs.put("BASCULA@COM1", "{ \"baudRate\": 9600, \"dataBits\": 8 }");
@@ -645,14 +649,11 @@ public final class ServiceLocator {
 
         @Override
         public DatabaseStorageInfo getDatabaseStorageInfo() {
-            // fake data
             return new DatabaseStorageInfo(1024L * 1024L * 120L, Optional.of(1024L * 1024L * 300L), Optional.empty());
         }
     }
 
-    /* ---------------------------
-       In-memory UsuarioRepository
-       --------------------------- */
+    /* --------------------------- In-memory UsuarioRepository --------------------------- */
     private static class InMemoryUsuarioRepository implements UsuarioRepository {
         private final Map<Integer, Usuario> store = new ConcurrentHashMap<>();
         private final AtomicInteger idSeq = new AtomicInteger(1);
@@ -698,9 +699,7 @@ public final class ServiceLocator {
         }
     }
 
-    /* ---------------------------
-       In-memory ProductoRepository
-       --------------------------- */
+    /* --------------------------- In-memory ProductoRepository --------------------------- */
     private static class InMemoryProductoRepository implements ProductoRepository {
         private final Map<Integer, Producto> byId = new ConcurrentHashMap<>();
         private final Map<String, Integer> idByCode = new ConcurrentHashMap<>();
@@ -709,19 +708,20 @@ public final class ServiceLocator {
         @Override
         public Producto save(Producto p) {
             Integer id = seq.getAndIncrement();
-
-            // evitar códigos duplicados
             if (p.getCodigo() != null) {
                 Integer existing = idByCode.get(p.getCodigo());
                 if (existing != null) {
                     throw new IllegalArgumentException("Código ya existe: " + p.getCodigo());
                 }
             }
-
             Producto toStore = new Producto(
-                    id, p.getCodigo(), p.getNombre(),
-                    p.getPrecioUnitario(), p.getTipo(),
-                    p.getStockActual(), p.getStockUmbral()
+                    id,
+                    p.getCodigo(),
+                    p.getNombre(),
+                    p.getPrecioUnitario(),
+                    p.getTipo(),
+                    p.getStockActual(),
+                    p.getStockUmbral()
             );
             byId.put(id, toStore);
             if (p.getCodigo() != null) idByCode.put(p.getCodigo(), id);
@@ -734,11 +734,8 @@ public final class ServiceLocator {
             if (id == null || !byId.containsKey(id)) {
                 throw new IllegalArgumentException("Producto no existe: " + id);
             }
-
-            // si cambia el código, mantener consistencia del índice
             String oldCode = byId.get(id).getCodigo();
             String newCode = p.getCodigo();
-
             if (newCode != null && !newCode.equals(oldCode)) {
                 Integer clash = idByCode.get(newCode);
                 if (clash != null && !clash.equals(id)) {
@@ -747,11 +744,14 @@ public final class ServiceLocator {
                 if (oldCode != null) idByCode.remove(oldCode);
                 idByCode.put(newCode, id);
             }
-
             Producto updated = new Producto(
-                    id, newCode, p.getNombre(),
-                    p.getPrecioUnitario(), p.getTipo(),
-                    p.getStockActual(), p.getStockUmbral()
+                    id,
+                    newCode,
+                    p.getNombre(),
+                    p.getPrecioUnitario(),
+                    p.getTipo(),
+                    p.getStockActual(),
+                    p.getStockUmbral()
             );
             byId.put(id, updated);
             return updated;
@@ -788,9 +788,13 @@ public final class ServiceLocator {
             Producto p = byId.get(productoId);
             if (p == null) throw new IllegalArgumentException("Producto no existe: " + productoId);
             Producto updated = new Producto(
-                    p.getProductoId(), p.getCodigo(), p.getNombre(),
-                    p.getPrecioUnitario(), p.getTipo(),
-                    newStock, p.getStockUmbral()
+                    p.getProductoId(),
+                    p.getCodigo(),
+                    p.getNombre(),
+                    p.getPrecioUnitario(),
+                    p.getTipo(),
+                    newStock,
+                    p.getStockUmbral()
             );
             byId.put(productoId, updated);
         }

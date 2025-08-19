@@ -13,11 +13,6 @@ import javafx.scene.layout.VBox;
 import java.text.NumberFormat;
 import java.util.Locale;
 
-/**
- * ListCell personalizado para mostrar Producto con imagen, nombre y metadatos.
- *
- * Uso: lvProductos.setCellFactory(list -> new ProductCell());
- */
 public class ProductCell extends ListCell<Producto> {
 
     private final HBox root = new HBox(10);
@@ -26,33 +21,33 @@ public class ProductCell extends ListCell<Producto> {
     private final Label lblName = new Label();
     private final Label lblMeta = new Label();
     private final Label lblStock = new Label();
+    private final Label lblTypeBadge = new Label();
 
     private static final NumberFormat CURRENCY = NumberFormat.getCurrencyInstance(new Locale("es", "CO"));
 
     public ProductCell() {
         super();
 
-        // ImageView configuración (tamaño uniforme)
         iv.setFitWidth(92);
         iv.setFitHeight(64);
         iv.setPreserveRatio(true);
-        iv.getStyleClass().add("avatar"); // usa clase genérica del css
+        iv.getStyleClass().add("avatar");
 
         lblName.getStyleClass().add("user-tile-name");
-        lblMeta.getStyleClass().add("product-meta"); // puede no existir en styles.css pero no rompe
+        lblMeta.getStyleClass().add("product-meta");
         lblStock.getStyleClass().add("label-status");
+
+        lblTypeBadge.getStyleClass().add("product-type-badge");
+        lblTypeBadge.setAlignment(Pos.CENTER);
 
         metaBox.getChildren().addAll(lblName, lblMeta);
         metaBox.setAlignment(Pos.CENTER_LEFT);
-
-        // Ensure the meta box grows if cell wide
         HBox.setHgrow(metaBox, Priority.ALWAYS);
 
         root.setAlignment(Pos.CENTER_LEFT);
-        root.getStyleClass().add("user-tile-root"); // reutiliza tu clase de estilo global
+        root.getStyleClass().add("user-tile-root");
         root.getChildren().addAll(iv, metaBox, lblStock);
 
-        // Ajustes visuales
         lblStock.setMinWidth(80);
         lblStock.setAlignment(Pos.CENTER_RIGHT);
     }
@@ -60,16 +55,15 @@ public class ProductCell extends ListCell<Producto> {
     @Override
     protected void updateItem(Producto item, boolean empty) {
         super.updateItem(item, empty);
+
         if (empty || item == null) {
             setText(null);
             setGraphic(null);
             return;
         }
 
-        // Nombre
         lblName.setText(item.getNombre() == null ? "(sin nombre)" : item.getNombre());
 
-        // Meta: código, tipo y precio
         StringBuilder meta = new StringBuilder();
         if (item.getCodigo() != null && !item.getCodigo().isBlank()) {
             meta.append(item.getCodigo());
@@ -81,27 +75,48 @@ public class ProductCell extends ListCell<Producto> {
         if (item.getPrecioUnitario() != null) {
             if (meta.length() > 0) meta.append(" • ");
             try {
-                meta.append(CURRENCY.format(item.getPrecioUnitario()));
+                String price = CURRENCY.format(item.getPrecioUnitario());
+                if (item.getTipo() != null && "PESO".equalsIgnoreCase(item.getTipo().name())) {
+                    price = price + "/kg";
+                }
+                meta.append(price);
             } catch (Exception e) {
                 meta.append(item.getPrecioUnitario().toPlainString());
             }
         }
         lblMeta.setText(meta.toString());
 
-        // Stock badge (si aplica)
         if (item.getStockActual() != null) {
             lblStock.setText(item.getStockActual().toPlainString());
-            if (item.isStockLow()) {
-                lblStock.getStyleClass().add("stock-badge-low"); // clase definida en tu optional, si no existe no rompe
-            } else {
-                lblStock.getStyleClass().remove("stock-badge-low");
-            }
+            try {
+                if (item.getStockUmbral() != null && item.getStockActual().compareTo(item.getStockUmbral()) <= 0) {
+                    if (!lblStock.getStyleClass().contains("stock-badge-low"))
+                        lblStock.getStyleClass().add("stock-badge-low");
+                } else {
+                    lblStock.getStyleClass().removeAll("stock-badge-low");
+                }
+            } catch (Exception ignored) { }
         } else {
             lblStock.setText("");
-            lblStock.getStyleClass().remove("stock-badge-low");
+            lblStock.getStyleClass().removeAll("stock-badge-low");
         }
 
-        // Imagen
+        if (item.getTipo() != null) {
+            String t = item.getTipo().name();
+            lblTypeBadge.setText(t);
+            lblTypeBadge.getStyleClass().removeAll("peso", "unidad");
+            if ("PESO".equalsIgnoreCase(t)) {
+                if (!lblTypeBadge.getStyleClass().contains("peso"))
+                    lblTypeBadge.getStyleClass().add("peso");
+            } else {
+                if (!lblTypeBadge.getStyleClass().contains("unidad"))
+                    lblTypeBadge.getStyleClass().add("unidad");
+            }
+        } else {
+            lblTypeBadge.setText("");
+            lblTypeBadge.getStyleClass().removeAll("peso", "unidad");
+        }
+
         try {
             String path = item.getImagenPath();
             if (path != null && !path.isBlank()) {
@@ -110,7 +125,11 @@ public class ProductCell extends ListCell<Producto> {
                 iv.setImage(ProductImageHelper.loadImage(null));
             }
         } catch (Throwable t) {
-            iv.setImage(ProductImageHelper.loadImage(null)); // placeholder
+            iv.setImage(ProductImageHelper.loadImage(null));
+        }
+
+        if (!metaBox.getChildren().contains(lblTypeBadge)) {
+            metaBox.getChildren().add(lblTypeBadge);
         }
 
         setText(null);

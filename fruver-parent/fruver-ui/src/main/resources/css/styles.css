@@ -1,7 +1,8 @@
 /* -----------------------------------------------------------
-   FRUVER UI - styles.css
+   FRUVER UI - styles.css (implementación final)
    Paleta: oliva / menta / crema
-   Mantener comportamiento: sólo estilos visuales
+   Ajustes: soporte listas PESO/UNIDAD, badges, top-cards, stock-low,
+   indicador imagen deshabilitada y ligeras mejoras de accesibilidad
    ----------------------------------------------------------- */
 
 /* Root */
@@ -128,7 +129,7 @@
 }
 
 /* -----------------------
-   List / User tiles
+   List / Product tiles
    ----------------------- */
 /* Default list cell style */
 .list-cell {
@@ -184,6 +185,46 @@
     -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.08), 6, 0.0, 0, 2);
 }
 
+/* Product meta text (code / type / price) */
+.product-meta {
+    -fx-font-size: 12px;
+    -fx-text-fill: #555;
+}
+
+/* Stock badge */
+.label-status {
+    -fx-font-weight: 600;
+}
+.stock-badge-low {
+    -fx-background-color: #FFE7E6;
+    -fx-text-fill: #B00020;
+    -fx-padding: 6 8;
+    -fx-background-radius: 6;
+    -fx-border-color: rgba(46,46,46,0.04);
+}
+
+/* Product type badge (small) */
+.product-type-badge {
+    -fx-padding: 4 8;
+    -fx-background-radius: 8;
+    -fx-font-size: 11px;
+    -fx-font-weight: 700;
+    -fx-text-fill: white;
+}
+.product-type-badge.peso { -fx-background-color: #43A047; } /* verde */
+.product-type-badge.unidad { -fx-background-color: #607D8B; } /* gris */
+
+/* -----------------------
+   Product lists specific
+   ----------------------- */
+.product-list-tab {
+    -fx-font-weight: 700;
+}
+.list-view {
+    -fx-background-color: transparent;
+    -fx-padding: 6;
+}
+
 /* -----------------------
    Device indicators
    ----------------------- */
@@ -201,8 +242,25 @@
 .progress-bar {
     -fx-accent: #66BB6A;
 }
-.label-status {
-    -fx-font-weight: 600;
+
+/* -----------------------
+   Top / Stats cards
+   ----------------------- */
+.top-card {
+    -fx-background-color: white;
+    -fx-padding: 12;
+    -fx-background-radius: 10;
+    -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.06), 8, 0.0, 0, 6);
+}
+.stat-label { -fx-font-weight: 700; -fx-font-size: 14px; }
+
+/* -----------------------
+   Disabled image preview (cuando tipo UNIDAD)
+   ----------------------- */
+.disabled-image {
+    -fx-opacity: 0.5;
+    -fx-effect: none;
+    -fx-background-color: transparent;
 }
 
 /* -----------------------
