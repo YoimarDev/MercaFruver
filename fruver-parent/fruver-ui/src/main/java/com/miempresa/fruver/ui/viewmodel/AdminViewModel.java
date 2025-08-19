@@ -1,18 +1,18 @@
 package com.miempresa.fruver.ui.viewmodel;
 
 import com.miempresa.fruver.ui.ServiceLocator;
+import javafx.application.Platform;
 import javafx.beans.property.*;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
-import javafx.collections.ListChangeListener;
-import javafx.collections.ObservableListBase;
 
 import java.util.List;
+import java.util.Objects;
 
 /**
  * ViewModel para AdminController
- * - mantiene estado en properties y expone operaciones síncronas usadas por el controller.
- * - evita duplicidad de métodos y expone ListProperty para bind con controles JavaFX.
+ * - Actualizaciones de propiedades en FX thread (safe)
+ * - expone operaciones síncronas usadas por el controller.
  */
 public class AdminViewModel {
 
@@ -31,7 +31,7 @@ public class AdminViewModel {
     private final ServiceLocator.AdminService adminService;
 
     public AdminViewModel(ServiceLocator.AdminService adminService) {
-        this.adminService = adminService;
+        this.adminService = Objects.requireNonNull(adminService);
     }
 
     /* ---------------------
@@ -52,42 +52,63 @@ public class AdminViewModel {
     /* ---------------------
        Simple getters
        --------------------- */
-    public ObservableList<String> getAvailablePorts() { return availablePorts.get(); }
-    public ObservableList<String> getConfigList() { return configList.get(); }
+    public javafx.collections.ObservableList<String> getAvailablePorts() { return availablePorts.get(); }
+    public javafx.collections.ObservableList<String> getConfigList() { return configList.get(); }
 
     /* ---------------------
        Utility / actions
        --------------------- */
 
     /**
-     * Descubre puertos usando adminService y actualiza la lista observable.
-     * Devuelve la lista detectada (útil para uso inmediato por controller).
+     * Descubre puertos usando adminService y actualiza la lista observable (EN FX THREAD).
      */
     public List<String> discoverPorts() {
         List<String> ports = adminService.listAvailablePorts();
-        // Actualizar observable list (mantener la instancia para que los bindings sigan funcionando)
-        availablePorts.get().setAll(ports);
+        // actualizar en FX thread
+        Platform.runLater(() -> {
+            try {
+                availablePorts.get().setAll(ports);
+            } catch (Exception ex) {
+                availablePorts.set(FXCollections.observableArrayList(ports));
+            }
+        });
         return ports;
     }
 
     /**
      * Refresca la lista de configuraciones desde el servicio.
-     * Formato esperado por UI: "TIPO@PUERTO|JSON"
+     * Ejecuta actualizaciones de propiedades en FX thread para evitar excepciones.
      */
     public void refreshConfigs() {
         setBusy(true);
         try {
             List<String> confs = adminService.listDeviceConfigs();
-            configList.get().setAll(confs);
-            setStatus("Configuraciones cargadas: " + confs.size());
-        } finally {
-            setBusy(false);
+            // actualizar observable y status en hilo FX
+            Platform.runLater(() -> {
+                try {
+                    if (confs == null) {
+                        configList.get().clear();
+                        setStatus("No hay configuraciones (o no se pudo leer).");
+                    } else {
+                        configList.get().setAll(confs);
+                        setStatus("Configuraciones cargadas: " + confs.size());
+                    }
+                } finally {
+                    setBusy(false);
+                }
+            });
+        } catch (Throwable t) {
+            // reportar error en hilo FX
+            Platform.runLater(() -> {
+                setStatus("Error cargando configuraciones: " + t.getMessage());
+                setBusy(false);
+            });
         }
     }
 
+
     /**
      * Carga una representación de configuración en los campos editables del VM.
-     * Formato esperado: "TIPO@PUERTO|PARAMS_JSON"
      */
     public void loadConfigToEditor(String repr) {
         if (repr == null) return;
@@ -97,16 +118,43 @@ public class AdminViewModel {
         String[] leftParts = left.split("@", 2);
         String tipo = leftParts.length > 0 ? leftParts[0] : "BASCULA";
         String puerto = leftParts.length > 1 ? leftParts[1] : "";
-        type.set(tipo);
-        port.set(puerto);
-        params.set(paramsText);
+        //estas actualizaciones pueden hacerse en cualquier hilo pero normalmente se ejecutan en FX thread desde Controller
+        Platform.runLater(() -> {
+            type.set(tipo);
+            port.set(puerto);
+            params.set(paramsText);
+        });
     }
 
     /* ---------------------
        Small setters used by controller
        --------------------- */
 
-    public void setStatus(String s) { statusMessage.set(s); }
-    public void setCleanupMessage(String s) { cleanupMessage.set(s); }
-    public void setBusy(boolean b) { busy.set(b); }
+    public void setStatus(String s) {
+        Platform.runLater(() -> statusMessage.set(s));
+    }
+    public void setCleanupMessage(String s) { Platform.runLater(() -> cleanupMessage.set(s)); }
+    public void setBusy(boolean b) { Platform.runLater(() -> busy.set(b)); }
+
+    // Indicadores para UI (escala/lector)
+    private final StringProperty scaleStatus = new SimpleStringProperty("Desconocido");
+    private final StringProperty readerStatus = new SimpleStringProperty("Desconocido");
+    public StringProperty scaleStatusProperty() { return scaleStatus; }
+    public StringProperty readerStatusProperty() { return readerStatus; }
+
+    public void setScaleStatus(String s, boolean connected) {
+        Platform.runLater(() -> scaleStatus.set(s));
+    }
+    public void setReaderStatus(String s, boolean connected) {
+        Platform.runLater(() -> readerStatus.set(s));
+    }
+
+    /* -------------- Helpers to expose DB info to controller ------------- */
+    public com.miempresa.fruver.service.port.DatabaseStorageInfo getDatabaseStorageInfo() {
+        try {
+            return adminService.getDatabaseStorageInfo();
+        } catch (Throwable t) {
+            return null;
+        }
+    }
 }

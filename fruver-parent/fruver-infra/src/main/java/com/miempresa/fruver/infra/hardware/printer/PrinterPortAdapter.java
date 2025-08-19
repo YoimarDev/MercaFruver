@@ -1,34 +1,32 @@
 package com.miempresa.fruver.infra.hardware.printer;
 
-import com.miempresa.fruver.domain.exceptions.DataAccessException;
-import com.miempresa.fruver.service.port.PrinterPort;
+import com.miempresa.fruver.domain.port.PrinterPort;
 
-/** Implementación de PrinterPort delegando en PrinterService (infra). */
 public class PrinterPortAdapter implements PrinterPort {
 
-    private final PrinterService delegate;
+    private final PrinterService printerService;
 
     public PrinterPortAdapter() {
-        this.delegate = new PrinterService();
+        this.printerService = new PrinterService();
     }
 
     @Override
-    public void init(String printerId) throws DataAccessException {
-        delegate.init(printerId);
+    public void init(String printerId) {
+        printerService.init(printerId);
     }
 
     @Override
-    public void printReceipt(String content) throws DataAccessException {
-        delegate.printReceipt(content);
+    public void printReceipt(String payload) {
+        printerService.printReceipt(payload);
     }
 
     @Override
-    public void openCashDrawer() throws DataAccessException {
-        delegate.openCashDrawer();
+    public void openCashDrawer() {
+        printerService.openCashDrawer();
     }
 
     @Override
     public void close() {
-        try { delegate.close(); } catch (Throwable ignored) {}
+        printerService.close();
     }
 }

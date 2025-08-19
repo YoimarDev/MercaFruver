@@ -17,7 +17,7 @@ public class DeviceConfig {
         this.puerto = puerto;
         this.parametrosJson = parametrosJson;
     }
-
+    public Integer getId() { return configId; }
     public Integer getConfigId() { return configId; }
     public DeviceType getTipo() { return tipo; }
     public String getPuerto() { return puerto; }

@@ -1,11 +1,11 @@
 package com.miempresa.fruver.infra.hardware.scale;
 
+import com.miempresa.fruver.domain.port.ScalePort;
 import com.miempresa.fruver.domain.exceptions.DataAccessException;
-import com.miempresa.fruver.service.port.ScalePort;
 
 /**
- * Adapter que implementa ScalePort delegando en ScaleService (clase concreta en infra).
- * Mantén este código en fruver-infra (no en fruver-service).
+ * Adapter que implementa ScalePort delegando en ScaleService.
+ * Importante: usa el port desde fruver-domain (no desde fruver-service).
  */
 public class ScalePortAdapter implements ScalePort {
 
@@ -16,22 +16,23 @@ public class ScalePortAdapter implements ScalePort {
     }
 
     @Override
-    public void open(String portName, int baudRate) throws DataAccessException {
+    public void open(String portName, int baudRate) {
+        // ScaleService lanza DataAccessException (runtime) en fallos
         delegate.open(portName, baudRate);
     }
 
     @Override
-    public double readWeightKg() throws DataAccessException {
+    public double readWeightKg() {
         return delegate.readWeightKg();
     }
 
     @Override
-    public int readWeightGrams() throws DataAccessException {
+    public int readWeightGrams() {
         return delegate.readWeightGrams();
     }
 
     @Override
     public void close() {
-        try { delegate.close(); } catch (Throwable ignored) {}
+        try { delegate.close(); } catch (Throwable ignored) { }
     }
 }

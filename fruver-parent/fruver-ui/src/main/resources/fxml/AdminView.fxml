@@ -54,7 +54,11 @@
                                   promptText='{"baudRate":9600,"dataBits":8,"parity":"NONE"}'/>
 
                         <Label text="Probar lector (enfoca y escanea):" GridPane.rowIndex="3" GridPane.columnIndex="0"/>
-                        <TextField fx:id="txtBarcodeTest" GridPane.rowIndex="3" GridPane.columnIndex="1" promptText="Escanea aquí para probar lector"/>
+                        <TextField fx:id="txtBarcodeTest" GridPane.rowIndex="3" GridPane.columnIndex="1" promptText="Escanea aquí para probar lector">
+                            <tooltip>
+                                <Tooltip text="Escanea aquí para comprobar el lector en modo keyboard. Al detectar, se guardará la configuración LECTOR (keyboard)."/>
+                            </tooltip>
+                        </TextField>
                     </GridPane>
 
                     <HBox spacing="10" alignment="CENTER_LEFT">
@@ -63,22 +67,25 @@
                     </HBox>
 
                     <Label text="Configuraciones actuales:" style="-fx-font-weight:600;"/>
-                    <ListView fx:id="lvConfigs" prefHeight="220"/>
+                    <ListView fx:id="lvConfigs" prefHeight="220" editable="false">
+                        <tooltip>
+                            <Tooltip text="Doble clic para cargar la configuración en los campos de edición"/>
+                        </tooltip>
+                    </ListView>
 
                     <Label fx:id="lblStatus" wrapText="true"/>
                 </VBox>
 
-                <!-- Panel derecho: Mantenimiento de BD -->
+                <!-- Panel derecho: Mantenimiento de BD + indicadores -->
                 <VBox spacing="12">
                     <padding>
                         <Insets top="12" right="12" bottom="12" left="12"/>
                     </padding>
 
                     <Label text="Mantenimiento de Base de Datos" style="-fx-font-size:18px; -fx-font-weight:600;"/>
-                    <Label text="Backup y limpieza (operaciones destructivas). Haz backup antes de limpiar." wrapText="true"/>
+                    <Label text="Limpieza de ventas (operación destructiva). Haz backup por fuera si lo necesitas." wrapText="true"/>
 
                     <HBox spacing="10">
-                        <Button fx:id="btnBackup" text="Crear Backup" styleClass="primary-button" minWidth="150"/>
                         <Button fx:id="btnCleanSales" text="Limpiar Ventas" styleClass="primary-button" minWidth="150"/>
                     </HBox>
 
@@ -89,14 +96,14 @@
                     <Pane VBox.vgrow="ALWAYS"/>
 
                     <Label text="Indicadores:" style="-fx-font-weight:600;"/>
-                    <HBox spacing="10">
-                        <VBox spacing="2">
+                    <HBox spacing="20">
+                        <VBox spacing="4">
                             <Label text="Báscula:"/>
-                            <Label text="Estado:"/>
+                            <Label fx:id="lblScaleStatus" text="Desconocido" styleClass="device-indicator"/>
                         </VBox>
-                        <VBox spacing="2">
+                        <VBox spacing="4">
                             <Label text="Lector:"/>
-                            <Label text="Estado:"/>
+                            <Label fx:id="lblReaderStatus" text="Desconocido" styleClass="device-indicator"/>
                         </VBox>
                     </HBox>
                 </VBox>

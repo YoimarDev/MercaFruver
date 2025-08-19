@@ -2,19 +2,19 @@ package com.miempresa.fruver.ui;
 
 import com.miempresa.fruver.domain.model.Usuario;
 import com.miempresa.fruver.domain.repository.UsuarioRepository;
+import com.miempresa.fruver.domain.model.DeviceConfig;
+import com.miempresa.fruver.domain.model.DeviceConfig.DeviceType;
+import com.miempresa.fruver.service.port.DatabaseStorageInfo;
+import com.miempresa.fruver.service.usecase.GetDatabaseStorageUseCase;
 import com.miempresa.fruver.service.usecase.ListUsersUseCase;
 import com.miempresa.fruver.service.usecase.LoginUseCase;
+import com.miempresa.fruver.service.usecase.SaveDeviceConfigUseCase;
 import org.mindrot.jbcrypt.BCrypt;
 
 import javax.sql.DataSource;
-import java.io.*;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
-import java.time.format.DateTimeFormatter;
-import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -24,6 +24,8 @@ import java.util.function.Consumer;
  * ServiceLocator consolidado:
  * - inicializa Login/ListUsers (JDBC o in-memory)
  * - expone AdminService (JdbcAdminService cuando hay DataSource; InMemoryAdminService fallback)
+ *
+ * Nota: esta versión NO implementa backup (performBackup) por petición del cliente.
  */
 public final class ServiceLocator {
 
@@ -32,6 +34,9 @@ public final class ServiceLocator {
 
     // Admin service (stubs / fallback)
     private static volatile AdminService adminService;
+
+    // Flag para indicar si se está en modo demo (in-memory)
+    private static volatile boolean usingInMemoryAdminService = false;
 
     private ServiceLocator() {}
 
@@ -82,10 +87,20 @@ public final class ServiceLocator {
                         new com.miempresa.fruver.infra.db.DatabaseRepositoryJdbc(ds);
 
                 adminService = new JdbcAdminService(deviceRepo, dbRepo, ds);
+                usingInMemoryAdminService = false;
                 progressMsg.accept("AdminService (JDBC) listo");
+                progressMsg.accept("AdminService: JDBC inicializado correctamente.");
+                System.out.println("[ServiceLocator] AdminService inicializado: " + adminService.getClass().getName());
             } catch (Throwable t) {
-                progressMsg.accept("No se pudo inicializar AdminService JDBC: " + t.getMessage());
+                // Mostrar traza y usar fallback in-memory
+                System.err.println("[ServiceLocator] No se pudo inicializar AdminService JDBC: " + t.getClass().getName() + " - " + t.getMessage());
+                System.err.println("[ServiceLocator] Recomendación: compila e instala fruver-infra en el local repo (mvn clean install desde el root) y revisa que fruver-ui dependa de fruver-infra en su pom.xml.");
+                t.printStackTrace();
+                usingInMemoryAdminService = true;
                 adminService = new InMemoryAdminService();
+                progressMsg.accept("No se pudo inicializar AdminService JDBC: " + t.getClass().getSimpleName() + " - " + t.getMessage());
+                progressMsg.accept("Modo DEMO (in-memory) activado. Algunas operaciones no serán persistentes.");
+                System.out.println("[ServiceLocator] Fallback AdminService inicializado: " + adminService.getClass().getName());
             }
 
             progressPercent.accept(1.0);
@@ -121,7 +136,9 @@ public final class ServiceLocator {
         listUsersUseCase = new ListUsersUseCase(inmem);
 
         // inicializar adminService in-memory también para que la UI admin funcione
+        usingInMemoryAdminService = true;
         adminService = new InMemoryAdminService();
+        System.out.println("[ServiceLocator] InMemoryAdminService inicializado (modo demo).");
     }
 
     /* ----------------------
@@ -151,10 +168,9 @@ public final class ServiceLocator {
         List<String> listDeviceConfigs(); // formato: "TIPO@PUERTO|JSON"
         boolean testDeviceConnection(String tipo, String port, Consumer<String> progressMsg, Consumer<Double> progressPercent);
         void saveDeviceConfig(String tipo, String port, String params);
-        void performBackup(Consumer<String> progressMsg, Consumer<Double> progressPercent) throws Exception;
         void cleanSalesData(Consumer<String> progressMsg, Consumer<Double> progressPercent) throws Exception;
         // utilidad: obtener info espacio db (usado por UI)
-        com.miempresa.fruver.service.dto.DatabaseStorageInfo getDatabaseStorageInfo();
+        DatabaseStorageInfo getDatabaseStorageInfo();
     }
 
     public static AdminService getAdminService() {
@@ -169,8 +185,13 @@ public final class ServiceLocator {
         return adminService;
     }
 
+    public static boolean isUsingInMemoryAdminService() {
+        return usingInMemoryAdminService;
+    }
+
     /**
      * Implementación JDBC de AdminService (usa DeviceConfigRepositoryJdbc y DatabaseRepositoryJdbc).
+     * Esta versión NO implementa backup (performBackup).
      */
     private static class JdbcAdminService implements AdminService {
 
@@ -178,54 +199,12 @@ public final class ServiceLocator {
         private final com.miempresa.fruver.infra.db.DatabaseRepositoryJdbc dbRepo;
         private final DataSource ds;
 
-        // extraídas de DataSource si es Hikari (opcional)
-        private final String mysqldumpCmd = "mysqldump";
-        private final String dbUser;
-        private final String dbPassword;
-        private final String dbHost;
-        private final int dbPort;
-        private final String dbName;
-
         public JdbcAdminService(com.miempresa.fruver.infra.db.DeviceConfigRepositoryJdbc deviceRepo,
                                 com.miempresa.fruver.infra.db.DatabaseRepositoryJdbc dbRepo,
                                 DataSource ds) {
             this.deviceRepo = deviceRepo;
             this.dbRepo = dbRepo;
             this.ds = ds;
-
-            // Intentar extraer credenciales si DataSource es Hikari
-            String tmpUser = null, tmpPass = null, tmpHost = null, tmpDb = null;
-            int tmpPort = 3306;
-            try {
-                Class<?> hikariCls = Class.forName("com.zaxxer.hikari.HikariDataSource");
-                if (hikariCls.isInstance(ds)) {
-                    Object hd = hikariCls.cast(ds);
-                    tmpUser = (String) hikariCls.getMethod("getUsername").invoke(hd);
-                    tmpPass = (String) hikariCls.getMethod("getPassword").invoke(hd);
-                    String jdbcUrl = (String) hikariCls.getMethod("getJdbcUrl").invoke(hd);
-                    // parse jdbc:mysql://host:port/db
-                    if (jdbcUrl != null && jdbcUrl.startsWith("jdbc:mysql://")) {
-                        String withoutPrefix = jdbcUrl.substring("jdbc:mysql://".length());
-                        String[] parts = withoutPrefix.split("/", 2);
-                        String hostPort = parts[0];
-                        tmpDb = parts.length > 1 ? parts[1].split("\\?")[0] : "";
-                        if (hostPort.contains(":")) {
-                            String[] hp = hostPort.split(":");
-                            tmpHost = hp[0];
-                            tmpPort = Integer.parseInt(hp[1]);
-                        } else {
-                            tmpHost = hostPort;
-                        }
-                    }
-                }
-            } catch (Throwable t) {
-                tmpUser = null; tmpPass = null; tmpHost = null; tmpDb = null; tmpPort = 3306;
-            }
-            dbUser = tmpUser;
-            dbPassword = tmpPass;
-            dbHost = tmpHost;
-            dbPort = tmpPort;
-            dbName = tmpDb;
         }
 
         @Override
@@ -245,157 +224,185 @@ public final class ServiceLocator {
         @Override
         public List<String> listDeviceConfigs() {
             try {
-                List<com.miempresa.fruver.domain.model.DeviceConfig> list = deviceRepo.findAll();
+                List<DeviceConfig> list = deviceRepo.findAll();
                 List<String> out = new ArrayList<>();
                 for (var c : list) {
                     out.add(c.getTipo().name() + "@" + c.getPuerto() + "|" + (c.getParametrosJson() == null ? "{}" : c.getParametrosJson()));
                 }
                 return out;
             } catch (Throwable t) {
+                System.err.println("[JdbcAdminService] Error listDeviceConfigs(): " + t.getMessage());
                 return List.of();
             }
         }
 
+        /**
+         * Test de conexión: intenta usar ScaleService / BarcodeService por reflexión si están disponibles.
+         * Si no están, usa heurística (COM/tty).
+         */
         @Override
         public boolean testDeviceConnection(String tipo, String port, Consumer<String> progressMsg, Consumer<Double> progressPercent) {
-            // Para báscula intentamos leer un peso si ScaleService está disponible (reflectively).
-            // dentro de JdbcAdminService.testDeviceConnection(...)
             try {
                 if ("BASCULA".equalsIgnoreCase(tipo)) {
+                    // obtener baud si existe config
+                    int baud = 9600;
+                    try {
+                        Optional<DeviceConfig> opt = deviceRepo.findByType(DeviceType.BASCULA);
+                        if (opt.isPresent()) {
+                            String pj = opt.get().getParametrosJson();
+                            String s = pj.replaceAll("(?s).*\"baudRate\"\\s*:\\s*(\\d+).*", "$1");
+                            if (s != null && s.matches("\\d+")) baud = Integer.parseInt(s);
+                        }
+                    } catch (Throwable ignored) {}
+
                     try {
                         Class<?> cls = Class.forName("com.miempresa.fruver.infra.hardware.scale.ScaleService");
-                        Object scaleSvc = null;
+                        Object scaleSvc = cls.getConstructor().newInstance();
                         try {
-                            // intentamos constructor por defecto
-                            scaleSvc = cls.getConstructor().newInstance();
-                        } catch (NoSuchMethodException ns) {
-                            // si no existe, intentamos constructor con puerto
+                            // intentar abrir y leer
                             try {
-                                scaleSvc = cls.getConstructor(String.class).newInstance(port);
-                            } catch (ReflectiveOperationException roe) {
-                                // no pudimos instanciar con puerto
-                                scaleSvc = null;
+                                java.lang.reflect.Method openM = cls.getMethod("open", String.class, int.class);
+                                openM.invoke(scaleSvc, port, baud);
+                            } catch (NoSuchMethodException nsm) {
+                                // si no existe open(String,int) intentamos open(String) o ignoramos
+                                try {
+                                    java.lang.reflect.Method openM2 = cls.getMethod("open", String.class);
+                                    openM2.invoke(scaleSvc, port);
+                                } catch (NoSuchMethodException ignored) {}
                             }
-                        }
 
-                        if (scaleSvc != null) {
-                            // intentamos método readWeight (si existe)
+                            // intentar leer peso por readWeightGrams, readWeightKg o readWeight
+                            Object val = null;
                             try {
-                                java.lang.reflect.Method m = cls.getMethod("readWeight");
-                                Object val = m.invoke(scaleSvc);
-                                if (progressMsg != null) progressMsg.accept("Peso leído: " + String.valueOf(val));
-                                if (progressPercent != null) progressPercent.accept(1.0);
-                                return true;
-                            } catch (NoSuchMethodException nm) {
-                                // no tiene readWeight -> consideramos que la instancia fue creada correctamente
-                                if (progressMsg != null) progressMsg.accept("Báscula instanciada (sin readWeight).");
-                                if (progressPercent != null) progressPercent.accept(1.0);
-                                return true;
-                            } catch (ReflectiveOperationException | RuntimeException ex) {
-                                // error invocando método
-                                if (progressMsg != null) progressMsg.accept("Error leyendo peso: " + ex.getMessage());
-                                if (progressPercent != null) progressPercent.accept(0.0);
-                                return false;
+                                java.lang.reflect.Method m = cls.getMethod("readWeightGrams");
+                                val = m.invoke(scaleSvc);
+                            } catch (NoSuchMethodException nm1) {
+                                try {
+                                    java.lang.reflect.Method m2 = cls.getMethod("readWeightKg");
+                                    val = m2.invoke(scaleSvc);
+                                } catch (NoSuchMethodException nm2) {
+                                    try {
+                                        java.lang.reflect.Method m3 = cls.getMethod("readWeight");
+                                        val = m3.invoke(scaleSvc);
+                                    } catch (NoSuchMethodException ignored) {}
+                                }
                             }
+
+                            if (progressMsg != null) progressMsg.accept("Báscula probada" + (val == null ? "" : " (valor=" + val + ")"));
+                            if (progressPercent != null) progressPercent.accept(1.0);
+                            return true;
+                        } finally {
+                            try {
+                                java.lang.reflect.Method closeM = cls.getMethod("close");
+                                closeM.invoke(scaleSvc);
+                            } catch (Throwable ignored) {}
                         }
                     } catch (ClassNotFoundException cnf) {
-                        // ScaleService no disponible en classpath — fallback heurístico
-                        if (progressMsg != null) progressMsg.accept("ScaleService no disponible en classpath.");
+                        // no hay infra; fallback heurístico
+                        if (progressMsg != null) progressMsg.accept("ScaleService no disponible en classpath (heurística).");
+                    } catch (ReflectiveOperationException | RuntimeException ex) {
+                        if (progressMsg != null) progressMsg.accept("Error leyendo báscula: " + ex.getMessage());
+                        if (progressPercent != null) progressPercent.accept(0.0);
+                        return false;
+                    }
+                } else if ("LECTOR".equalsIgnoreCase(tipo)) {
+                    // si puerto vacío -> keyboard OK
+                    if (port == null || port.isBlank()) {
+                        if (progressMsg != null) progressMsg.accept("Modo keyboard (sin puerto) detectado.");
+                        if (progressPercent != null) progressPercent.accept(1.0);
+                        return true;
+                    }
+                    try {
+                        Class<?> cls = Class.forName("com.miempresa.fruver.infra.hardware.barcode.BarcodeService");
+                        Object barcodeSvc = cls.getConstructor().newInstance();
+                        try {
+                            // intentar init si existe
+                            try {
+                                java.lang.reflect.Method initM = cls.getMethod("init");
+                                initM.invoke(barcodeSvc);
+                            } catch (NoSuchMethodException ignored) {}
+                            if (progressMsg != null) progressMsg.accept("Lector inicializado");
+                            if (progressPercent != null) progressPercent.accept(1.0);
+                            return true;
+                        } finally {
+                            try { java.lang.reflect.Method closeM = cls.getMethod("close"); closeM.invoke(barcodeSvc); } catch (Throwable ignored) {}
+                        }
+                    } catch (ClassNotFoundException cnf) {
+                        if (progressMsg != null) progressMsg.accept("BarcodeService no disponible (heurística).");
+                    } catch (ReflectiveOperationException ex) {
+                        if (progressMsg != null) progressMsg.accept("Error inicializando lector: " + ex.getMessage());
+                        if (progressPercent != null) progressPercent.accept(0.0);
+                        return false;
                     }
                 }
 
-                // Fallback heurístico simple: si puerto contiene COM o tty, asumimos OK
+                // Fallback heurístico final
                 boolean ok = port != null && (port.toUpperCase().contains("COM") || port.contains("tty"));
                 if (progressMsg != null) progressMsg.accept(ok ? "Respuesta recibida (heurística)." : "Sin respuesta (heurística).");
                 if (progressPercent != null) progressPercent.accept(1.0);
                 return ok;
             } catch (Throwable t) {
-                if (progressMsg != null) progressMsg.accept("Error prueba: " + t.getMessage());
                 if (progressPercent != null) progressPercent.accept(0.0);
                 return false;
             }
-
         }
 
+        /**
+         * Guarda/actualiza config del dispositivo.
+         * - usa deviceRepo.findByType(...) para ver si hay existente y llama deviceRepo.save(obj) pasando id si existe.
+         *
+         * Implementación: intenta usar el UseCase si es posible, pero tolera LECTOR con puerto vacío (keyboard).
+         */
         @Override
         public void saveDeviceConfig(String tipo, String port, String params) {
-            // validar y persistir usando DeviceConfig domain/model
-            com.miempresa.fruver.domain.model.DeviceConfig.DeviceType dt =
-                    com.miempresa.fruver.domain.model.DeviceConfig.DeviceType.valueOf(tipo.toUpperCase());
-            com.miempresa.fruver.domain.model.DeviceConfig cfg =
-                    new com.miempresa.fruver.domain.model.DeviceConfig(null, dt, port, params == null ? "{}" : params);
-            deviceRepo.save(cfg); // nuestro save ya hace upsert por tipo
-        }
-
-        @Override
-        public void performBackup(Consumer<String> progressMsg, Consumer<Double> progressPercent) throws Exception {
-            // Requiere mysqldump disponible
-            if (dbName == null || dbUser == null || dbPassword == null || dbHost == null) {
-                if (progressMsg != null) progressMsg.accept("No hay credenciales DB disponibles para mysqldump (revisa DataSource pool).");
-                throw new IllegalStateException("Credenciales DB no disponibles en DataSource para backup.");
-            }
-
-            // Crear archivo temporal .cnf con credenciales (seguro: permisos 600)
-            Path tmp = Files.createTempFile("fruver-backup-", ".cnf");
-            String content = "[client]\nuser=" + dbUser + "\npassword=" + dbPassword + "\nhost=" + dbHost + "\nport=" + dbPort + "\n";
-            Files.writeString(tmp, content);
-            tmp.toFile().setReadable(true, true);
-            tmp.toFile().setWritable(true, true);
-
-            String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
-            String filename = "fruver-backup-" + timestamp + ".sql";
-            Path target = Path.of(System.getProperty("user.home"), "fruver-backups");
-            Files.createDirectories(target);
-            Path out = target.resolve(filename);
-
-            List<String> cmd = new ArrayList<>();
-            cmd.add(mysqldumpCmd);
-            cmd.add("--defaults-extra-file=" + tmp.toAbsolutePath().toString());
-            cmd.add("--single-transaction");
-            cmd.add("--quick");
-            cmd.add("--routines");
-            cmd.add("--events");
-            cmd.add("--databases");
-            cmd.add(dbName);
-
-            if (progressMsg != null) progressMsg.accept("Ejecutando mysqldump...");
-            if (progressPercent != null) progressPercent.accept(0.05);
-
-            ProcessBuilder pb = new ProcessBuilder(cmd);
-            pb.redirectErrorStream(true);
-            Process p = pb.start();
-
-            // leer salida y volcar al archivo
-            try (InputStream in = p.getInputStream();
-                 OutputStream fos = Files.newOutputStream(out)) {
-                byte[] buf = new byte[8192];
-                int read;
-                long total = 0;
-                while ((read = in.read(buf)) != -1) {
-                    fos.write(buf, 0, read);
-                    total += read;
-                    if (progressMsg != null && total % (1024 * 1024) == 0) { // cada MB aprox
-                        progressMsg.accept("Volcado... bytes=" + total);
-                    }
+            DeviceType dt = DeviceType.valueOf(tipo.toUpperCase());
+            String effectiveParams = params == null ? "{}" : params;
+            try {
+                // Caso especial: LECTOR puede venir con puerto vacío (keyboard wedge) — repo.save debe tolerarlo.
+                if (dt == DeviceType.LECTOR && (port == null || port.isBlank())) {
+                    // usar repo directamente para crear la config con puerto vacío
+                    DeviceConfig cfg = new DeviceConfig(null, dt, "", effectiveParams);
+                    deviceRepo.save(cfg);
+                    System.out.println("[JdbcAdminService] Guardada configuración LECTOR (keyboard) directamente en repo.");
+                    return;
                 }
-            }
 
-            int rc = p.waitFor();
-            // borrar archivo tmp
-            try { Files.deleteIfExists(tmp); } catch (Exception ignored) {}
+                // Intentar usar el UseCase (fruver-service). Si fruver-service no está en classpath, fallback a deviceRepo.
+                try {
+                    SaveDeviceConfigUseCase usecase = new SaveDeviceConfigUseCase(deviceRepo);
+                    usecase.execute(tipo, port == null ? "" : port, effectiveParams);
+                    System.out.println("[JdbcAdminService] Guardada configuración usando SaveDeviceConfigUseCase.");
+                    return;
+                } catch (NoClassDefFoundError | Exception useEx) {
+                    // si falla el usecase por cualquier motivo, caemos a repo.save
+                    System.err.println("[JdbcAdminService] SaveDeviceConfigUseCase no disponible o falló: " + useEx.getMessage());
+                }
 
-            if (rc != 0) {
-                if (progressMsg != null) progressMsg.accept("mysqldump finalizó con código " + rc);
-                if (progressPercent != null) progressPercent.accept(0.0);
-                throw new RuntimeException("mysqldump falló con código: " + rc);
+                // Fallback: comportamiento clásico
+                Optional<DeviceConfig> existOpt = Optional.empty();
+                try {
+                    existOpt = deviceRepo.findByType(dt);
+                } catch (Throwable t) {
+                    System.err.println("[JdbcAdminService] findByType falló: " + t.getMessage());
+                }
+
+                if (existOpt != null && existOpt.isPresent()) {
+                    DeviceConfig existing = existOpt.get();
+                    Integer existingId = existing.getConfigId();
+                    DeviceConfig toSave = new DeviceConfig(existingId, dt, port == null ? "" : port, effectiveParams);
+                    deviceRepo.save(toSave);
+                    System.out.println("[JdbcAdminService] Actualizada configuración para tipo=" + tipo + " id=" + existingId);
+                } else {
+                    DeviceConfig saved = deviceRepo.save(new DeviceConfig(null, dt, port == null ? "" : port, effectiveParams));
+                    System.out.println("[JdbcAdminService] Nueva configuración guardada para tipo=" + tipo + " -> id=" + (saved == null ? "null" : saved.getConfigId()));
+                }
+            } catch (Throwable t) {
+                throw new RuntimeException("Error al persistir configuración: " + t.getMessage(), t);
             }
-            if (progressMsg != null) progressMsg.accept("Backup completado: " + out.toAbsolutePath());
-            if (progressPercent != null) progressPercent.accept(1.0);
         }
 
         @Override
         public void cleanSalesData(Consumer<String> progressMsg, Consumer<Double> progressPercent) throws Exception {
-            // Ejecuta eliminación dentro de transacción. Se espera que la UI haya generado/adjuntado backup.
             try (Connection c = ds.getConnection()) {
                 c.setAutoCommit(false);
                 try (PreparedStatement delItems = c.prepareStatement("DELETE FROM VENTA_ITEM");
@@ -426,8 +433,14 @@ public final class ServiceLocator {
         }
 
         @Override
-        public com.miempresa.fruver.service.dto.DatabaseStorageInfo getDatabaseStorageInfo() {
-            return new com.miempresa.fruver.service.usecase.GetDatabaseStorageUseCase(dbRepo).execute();
+        public DatabaseStorageInfo getDatabaseStorageInfo() {
+            try {
+                return new GetDatabaseStorageUseCase(dbRepo).execute();
+            } catch (Throwable t) {
+                // si falla, retornamos null para que la UI lo maneje
+                System.err.println("[JdbcAdminService] getDatabaseStorageInfo falló: " + t.getMessage());
+                return null;
+            }
         }
     }
 
@@ -440,7 +453,12 @@ public final class ServiceLocator {
         private final Map<String, String> configs = new LinkedHashMap<>();
 
         public InMemoryAdminService() {
-            configs.put("BASCULA@COM1", "{ \"baudRate\": 9600, \"dataBits\": 8 }");
+            // Notar: no seed por defecto. Evitamos mostrar configuraciones "falsas".
+            // Para pruebas locales explícitas se puede pasar -Dfruver.demo.seed=true
+            String demoSeed = System.getProperty("fruver.demo.seed");
+            if ("true".equalsIgnoreCase(demoSeed)) {
+                configs.put("BASCULA@COM1", "{ \"baudRate\": 9600, \"dataBits\": 8 }");
+            }
         }
 
         @Override
@@ -466,42 +484,28 @@ public final class ServiceLocator {
         @Override
         public boolean testDeviceConnection(String tipo, String port, Consumer<String> progressMsg, Consumer<Double> progressPercent) {
             try {
-                if (progressMsg != null) progressMsg.accept("Intentando abrir puerto " + port + "...");
+                if (progressMsg != null) progressMsg.accept("Intentando abrir puerto " + port + " (simulado)...");
                 Thread.sleep(200);
                 if (progressPercent != null) progressPercent.accept(0.3);
-                if (progressMsg != null) progressMsg.accept("Enviando comando de prueba...");
+                if (progressMsg != null) progressMsg.accept("Enviando comando de prueba (simulado)...");
                 Thread.sleep(200);
                 if (progressPercent != null) progressPercent.accept(0.7);
-                boolean ok = port != null && (port.toUpperCase().contains("COM") || port.contains("tty"));
+                boolean ok = port != null && (port.toUpperCase().contains("COM") || port.contains("tty")) || (tipo != null && tipo.equalsIgnoreCase("LECTOR") && (port == null || port.isBlank()));
                 if (progressPercent != null) progressPercent.accept(1.0);
-                if (progressMsg != null) progressMsg.accept(ok ? "Respuesta recibida" : "Sin respuesta");
+                if (progressMsg != null) progressMsg.accept(ok ? "Respuesta recibida (simulado)" : "Sin respuesta (simulado)");
                 return ok;
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                if (progressMsg != null) progressMsg.accept("Prueba cancelada");
+                if (progressMsg != null) progressMsg.accept("Prueba cancelada (simulado)");
                 return false;
             }
         }
 
         @Override
         public void saveDeviceConfig(String tipo, String port, String params) {
-            String key = tipo + "@" + port;
+            String key = tipo + "@" + (port == null ? "" : port);
             configs.put(key, params == null ? "{}" : params);
-        }
-
-        @Override
-        public void performBackup(Consumer<String> progressMsg, Consumer<Double> progressPercent) throws Exception {
-            if (progressMsg != null) progressMsg.accept("Creando backup (simulado)...");
-            if (progressPercent != null) progressPercent.accept(0.05);
-            Thread.sleep(250);
-            if (progressMsg != null) progressMsg.accept("Exportando tablas...");
-            if (progressPercent != null) progressPercent.accept(0.35);
-            Thread.sleep(400);
-            if (progressMsg != null) progressMsg.accept("Comprimiendo backup...");
-            if (progressPercent != null) progressPercent.accept(0.75);
-            Thread.sleep(300);
-            if (progressPercent != null) progressPercent.accept(1.0);
-            if (progressMsg != null) progressMsg.accept("Backup completado (simulado).");
+            System.out.println("[InMemoryAdminService] saveDeviceConfig: " + key + " -> " + (params == null ? "{}" : params));
         }
 
         @Override
@@ -523,9 +527,9 @@ public final class ServiceLocator {
         }
 
         @Override
-        public com.miempresa.fruver.service.dto.DatabaseStorageInfo getDatabaseStorageInfo() {
+        public DatabaseStorageInfo getDatabaseStorageInfo() {
             // fake data
-            return new com.miempresa.fruver.service.dto.DatabaseStorageInfo(1024L * 1024L * 120L, Optional.of(1024L * 1024L * 300L), Optional.empty());
+            return new DatabaseStorageInfo(1024L * 1024L * 120L, Optional.of(1024L * 1024L * 300L), Optional.empty());
         }
     }
 

@@ -1,5 +1,5 @@
-// fruver-service/src/main/java/com/miempresa/fruver/service/dto/DatabaseStorageInfo.java
-package com.miempresa.fruver.service.dto;
+
+package com.miempresa.fruver.service.port;
 
 import java.util.Optional;
 
