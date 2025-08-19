@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.control.*?>
+<?import javafx.geometry.Insets?>
+
+<BorderPane xmlns:fx="http://javafx.com/fxml"
+            fx:controller="com.miempresa.fruver.ui.controller.AdminController"
+            stylesheets="@/css/styles.css" prefWidth="1200" prefHeight="800">
+
+    <!-- Topbar -->
+    <top>
+        <HBox styleClass="topbar" alignment="CENTER_LEFT" spacing="8">
+            <padding>
+                <Insets top="10" right="12" bottom="10" left="12"/>
+            </padding>
+            <Label fx:id="lblTitle" styleClass="brand"/>
+            <Region HBox.hgrow="ALWAYS"/>
+            <Button text="Salir" onAction="#onSalir" visible="false"/>
+        </HBox>
+    </top>
+
+    <!-- Center -->
+    <center>
+        <SplitPane orientation="HORIZONTAL" dividerPositions="0.50">
+            <items>
+
+                <!-- Panel izquierdo: Configuración de dispositivos -->
+                <VBox spacing="12" prefWidth="520">
+                    <padding>
+                        <Insets top="12" right="12" bottom="12" left="12"/>
+                    </padding>
+
+                    <Label text="Configuración de Dispositivos" style="-fx-font-size:18px; -fx-font-weight:600;"/>
+
+                    <GridPane hgap="8" vgap="8">
+                        <columnConstraints>
+                            <ColumnConstraints percentWidth="30"/>
+                            <ColumnConstraints percentWidth="70"/>
+                        </columnConstraints>
+
+                        <Label text="Tipo:" GridPane.rowIndex="0" GridPane.columnIndex="0"/>
+                        <ComboBox fx:id="cbDeviceType" GridPane.rowIndex="0" GridPane.columnIndex="1"/>
+
+                        <Label text="Puerto:" GridPane.rowIndex="1" GridPane.columnIndex="0"/>
+                        <HBox spacing="8" GridPane.rowIndex="1" GridPane.columnIndex="1">
+                            <ComboBox fx:id="cbAvailablePorts" prefWidth="200"/>
+                            <TextField fx:id="txtPort" promptText="COM1 / /dev/ttyS0" HBox.hgrow="ALWAYS"/>
+                        </HBox>
+
+                        <Label text="Parámetros (JSON):" GridPane.rowIndex="2" GridPane.columnIndex="0"/>
+                        <TextArea fx:id="txtParams"
+                                  GridPane.rowIndex="2" GridPane.columnIndex="1"
+                                  prefRowCount="4"
+                                  promptText='{"baudRate":9600,"dataBits":8,"parity":"NONE"}'/>
+
+                        <Label text="Probar lector (enfoca y escanea):" GridPane.rowIndex="3" GridPane.columnIndex="0"/>
+                        <TextField fx:id="txtBarcodeTest" GridPane.rowIndex="3" GridPane.columnIndex="1" promptText="Escanea aquí para probar lector"/>
+                    </GridPane>
+
+                    <HBox spacing="10" alignment="CENTER_LEFT">
+                        <Button fx:id="btnTest" text="Probar conexión" styleClass="primary-button" minWidth="160"/>
+                        <Button fx:id="btnSave" text="Guardar configuración" styleClass="primary-button" minWidth="180"/>
+                    </HBox>
+
+                    <Label text="Configuraciones actuales:" style="-fx-font-weight:600;"/>
+                    <ListView fx:id="lvConfigs" prefHeight="220"/>
+
+                    <Label fx:id="lblStatus" wrapText="true"/>
+                </VBox>
+
+                <!-- Panel derecho: Mantenimiento de BD -->
+                <VBox spacing="12">
+                    <padding>
+                        <Insets top="12" right="12" bottom="12" left="12"/>
+                    </padding>
+
+                    <Label text="Mantenimiento de Base de Datos" style="-fx-font-size:18px; -fx-font-weight:600;"/>
+                    <Label text="Backup y limpieza (operaciones destructivas). Haz backup antes de limpiar." wrapText="true"/>
+
+                    <HBox spacing="10">
+                        <Button fx:id="btnBackup" text="Crear Backup" styleClass="primary-button" minWidth="150"/>
+                        <Button fx:id="btnCleanSales" text="Limpiar Ventas" styleClass="primary-button" minWidth="150"/>
+                    </HBox>
+
+                    <Label text="Progreso:"/>
+                    <ProgressBar fx:id="pbCleanup" prefWidth="420" progress="0"/>
+                    <Label fx:id="lblCleanupStatus" wrapText="true"/>
+
+                    <Pane VBox.vgrow="ALWAYS"/>
+
+                    <Label text="Indicadores:" style="-fx-font-weight:600;"/>
+                    <HBox spacing="10">
+                        <VBox spacing="2">
+                            <Label text="Báscula:"/>
+                            <Label text="Estado:"/>
+                        </VBox>
+                        <VBox spacing="2">
+                            <Label text="Lector:"/>
+                            <Label text="Estado:"/>
+                        </VBox>
+                    </HBox>
+                </VBox>
+
+            </items>
+        </SplitPane>
+    </center>
+
+    <!-- Footer -->
+    <bottom>
+        <HBox alignment="CENTER_RIGHT">
+            <padding>
+                <Insets top="10" right="12" bottom="10" left="12"/>
+            </padding>
+            <Label text="Admin • fruver" styleClass="version-label"/>
+        </HBox>
+    </bottom>
+
+</BorderPane>

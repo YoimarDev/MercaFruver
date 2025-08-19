@@ -1,5 +1,6 @@
-package com.miempresa.fruver.ui;
+package com.miempresa.fruver.ui.controller;
 
+import com.miempresa.fruver.ui.ServiceLocator;
 import javafx.concurrent.Task;
 import javafx.fxml.FXML;
 import javafx.scene.control.Label;
@@ -19,21 +20,19 @@ public class SplashController {
         Task<Boolean> initTask = new Task<>() {
             @Override
             protected Boolean call() throws Exception {
-                updateMessage("Cargando configuración...");
-                Thread.sleep(300); // breve pausa para animación
-                // Llamar al inicializador central (implementarlo en ServiceLocator)
-                updateMessage("Conectando a la base de datos...");
-                boolean dbOk = ServiceLocator.initializeAndTestDb((msg) -> updateMessage(msg));
-                if (!dbOk) {
-                    updateMessage("No se pudo conectar a la BD.");
-                    return false;
-                }
-                updateMessage("Inicializando dispositivos...");
-                // aquí podrías invocar detection de báscula/lector (opcional)
-                Thread.sleep(300);
+                // Bind through updateMessage / updateProgress using callbacks
+                Consumer<String> msgConsumer = (msg) -> updateMessage(msg);
+                Consumer<Double> progressConsumer = (p) -> updateProgress(p == null ? 0.0 : p, 1.0);
+
+                // Llamada a ServiceLocator (ahora con progress numérico)
+                boolean ok = ServiceLocator.initializeAndTestDb(msgConsumer, progressConsumer);
+
+                // Pequeña pausa para que el usuario vea "Listo"
                 updateMessage("Listo");
+                updateProgress(1.0, 1.0);
                 Thread.sleep(200);
-                return true;
+
+                return ok;
             }
         };
 
@@ -46,13 +45,16 @@ public class SplashController {
             if (ok) {
                 if (onFinished != null) onFinished.run();
             } else {
-                // Si falla, mostrar mensaje persistente (ya lo hace lblStatus). Se podría añadir botón de reintento.
+                // Si falla, mostrar mensaje persistente (ya lo hace lblStatus).
+                // Opcional: habilitar botón reintentar (no implementado aquí).
             }
         });
 
         initTask.setOnFailed(e -> {
             lblStatus.textProperty().unbind();
             lblStatus.setText("Error durante inicialización: " + initTask.getException().getMessage());
+            progress.progressProperty().unbind();
+            progress.setProgress(0);
         });
 
         Thread t = new Thread(initTask, "splash-init");

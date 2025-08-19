@@ -1,34 +1,46 @@
 package com.miempresa.fruver.service.usecase;
 
-import com.miempresa.fruver.domain.exceptions.InvalidOperationException;
-import com.miempresa.fruver.domain.model.Producto;
-import com.miempresa.fruver.domain.repository.ProductoRepository;
-import com.miempresa.fruver.domain.exceptions.EntityNotFoundException;
-import com.miempresa.fruver.service.port.InputPort;
-import com.miempresa.fruver.infra.hardware.scale.ScaleService;
+import com.miempresa.fruver.service.port.ScalePort;
+import com.miempresa.fruver.domain.exceptions.DomainException;
+import com.miempresa.fruver.domain.exceptions.DataAccessException;
+
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 
 /**
- * Caso de uso para cálculo de precio por peso.
+ * UseCase para calcular precio de un producto por peso.
+ * No depende de la implementación concreta de la báscula (usa ScalePort).
  */
-public class CalcularPrecioUseCase implements InputPort<String, BigDecimal> {
-    private final ProductoRepository productoRepo;
-    private final ScaleService scaleService;
+public class CalcularPrecioUseCase {
 
-    public CalcularPrecioUseCase(ProductoRepository pr, ScaleService ss) {
-        this.productoRepo = pr;
-        this.scaleService = ss;
+    private final ScalePort scalePort;
+
+    /**
+     * Inyecta la abstracción de báscula.
+     */
+    public CalcularPrecioUseCase(ScalePort scalePort) {
+        this.scalePort = scalePort;
     }
 
-    @Override
-    public BigDecimal execute(String codigo) {
-        Producto p = productoRepo.findByCodigo(codigo)
-                .orElseThrow(() -> new EntityNotFoundException("Producto no encontrado: " + codigo));
-        if (p.getTipo() != Producto.TipoProducto.PESO) {
-            throw new InvalidOperationException("Producto no es de tipo PESO: " + codigo);
-        }
-        double weight = scaleService.readWeightKg();
+    /**
+     * Lee el peso de la báscula y calcula subtotal = precioUnitario * pesoKg
+     *
+     * @param precioUnitario precio por kg (ej: 4.50)
+     * @return subtotal redondeado a 2 decimales
+     */
+    public BigDecimal calcularSubtotalPorPeso(BigDecimal precioUnitario) {
+        if (precioUnitario == null) throw new DomainException("Precio inválido");
 
-        return p.getPrecioUnitario().multiply(BigDecimal.valueOf(weight));
+        try {
+            int gramos = scalePort.readWeightGrams();
+            BigDecimal kg = new BigDecimal(gramos).divide(new BigDecimal(1000), 6, RoundingMode.HALF_UP);
+            BigDecimal subtotal = precioUnitario.multiply(kg).setScale(2, RoundingMode.HALF_UP);
+            return subtotal;
+        } catch (DataAccessException dae) {
+            // Re-lanzar como DomainException para que la capa superior lo maneje
+            throw new DomainException("No se pudo leer peso: " + dae.getMessage(), dae);
+        } catch (Exception ex) {
+            throw new DomainException("Error calculando precio por peso: " + ex.getMessage(), ex);
+        }
     }
 }

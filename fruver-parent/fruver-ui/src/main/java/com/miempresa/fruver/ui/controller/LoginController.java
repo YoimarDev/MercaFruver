@@ -1,4 +1,4 @@
-package com.miempresa.fruver.ui;
+package com.miempresa.fruver.ui.controller;
 
 import com.miempresa.fruver.domain.model.Usuario;
 import com.miempresa.fruver.service.usecase.ListUsersUseCase;
@@ -51,7 +51,7 @@ public class LoginController {
         btnLogin.setOnAction(e -> vm.login(onLoginSuccess));
         btnClearUser.setOnAction(e -> clearSelection());
 
-        // 🎨 Mejorar aspecto del botón de login
+        // 🎨 Mejor aspecto del botón de login (puedes moverlo a CSS si prefieres)
         btnLogin.setStyle(
                 "-fx-background-color: linear-gradient(#4CAF50, #388E3C);" +
                         "-fx-text-fill: white;" +
@@ -60,6 +60,23 @@ public class LoginController {
                         "-fx-padding: 8 16;" +
                         "-fx-font-size: 14px;"
         );
+
+        // Cambiar texto del botón cuando está ocupado
+        vm.busyProperty().addListener((obs, oldV, newV) -> {
+            Platform.runLater(() -> {
+                btnLogin.setText(newV ? "Entrando..." : "Entrar");
+            });
+        });
+
+        // ENTER en txtPassword -> enviar login
+        txtPassword.setOnAction(e -> {
+            if (!vm.busyProperty().get()) {
+                btnLogin.fire();
+            }
+        });
+
+        // ENTER en txtUsername -> mover foco a password (útil si algún día es editable)
+        txtUsername.setOnAction(e -> txtPassword.requestFocus());
 
         setupListView();
         setupRoleFilter();

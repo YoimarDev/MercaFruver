@@ -18,21 +18,42 @@ public class DeviceConfigRepositoryJdbc implements DeviceConfigRepository {
         this.ds = ds;
     }
 
+    /**
+     * Guarda o actualiza (upsert) la configuración por tipo.
+     * Si ya existe una fila para ese tipo => UPDATE, sino => INSERT.
+     */
     @Override
     public DeviceConfig save(DeviceConfig d) {
-        String sql = "INSERT INTO CONFIG_DISP(tipo, puerto, parametros) VALUES (?, ?, ?)";
-        try (Connection c = ds.getConnection();
-             PreparedStatement ps = c.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
-            ps.setString(1, d.getTipo().name());
-            ps.setString(2, d.getPuerto());
-            ps.setString(3, d.getParametrosJson());
-            ps.executeUpdate();
-            try (ResultSet rs = ps.getGeneratedKeys()) {
-                if (rs.next()) {
-                    return new DeviceConfig(rs.getInt(1), d.getTipo(), d.getPuerto(), d.getParametrosJson());
+        if (d == null) throw new IllegalArgumentException("DeviceConfig nulo");
+
+        try (Connection c = ds.getConnection()) {
+            // Primero intentar encontrar por tipo
+            Optional<DeviceConfig> existing = findByType(d.getTipo());
+            if (existing.isPresent()) {
+                DeviceConfig e = existing.get();
+                String updateSql = "UPDATE CONFIG_DISP SET puerto = ?, parametros = ? WHERE config_id = ?";
+                try (PreparedStatement upd = c.prepareStatement(updateSql)) {
+                    upd.setString(1, d.getPuerto());
+                    upd.setString(2, d.getParametrosJson());
+                    upd.setInt(3, e.getConfigId());
+                    upd.executeUpdate();
                 }
+                return new DeviceConfig(e.getConfigId(), e.getTipo(), d.getPuerto(), d.getParametrosJson());
+            } else {
+                String insertSql = "INSERT INTO CONFIG_DISP(tipo, puerto, parametros) VALUES (?, ?, ?)";
+                try (PreparedStatement ps = c.prepareStatement(insertSql, Statement.RETURN_GENERATED_KEYS)) {
+                    ps.setString(1, d.getTipo().name());
+                    ps.setString(2, d.getPuerto());
+                    ps.setString(3, d.getParametrosJson());
+                    ps.executeUpdate();
+                    try (ResultSet rs = ps.getGeneratedKeys()) {
+                        if (rs.next()) {
+                            return new DeviceConfig(rs.getInt(1), d.getTipo(), d.getPuerto(), d.getParametrosJson());
+                        }
+                    }
+                }
+                return d;
             }
-            return d;
         } catch (SQLException ex) {
             throw new DataAccessException("Error guardando DeviceConfig", ex);
         }

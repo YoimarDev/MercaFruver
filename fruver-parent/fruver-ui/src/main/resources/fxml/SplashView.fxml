@@ -5,7 +5,7 @@
 <?import javafx.geometry.Pos?>
 
 <VBox xmlns:fx="http://javafx.com/fxml"
-      fx:controller="com.miempresa.fruver.ui.SplashController"
+      fx:controller="com.miempresa.fruver.ui.controller.SplashController"
       alignment="CENTER" spacing="14" prefWidth="560" prefHeight="360"
       styleClass="splash-root">
     <Label text="Merca Fruver C.Y.E." styleClass="splash-title"/>

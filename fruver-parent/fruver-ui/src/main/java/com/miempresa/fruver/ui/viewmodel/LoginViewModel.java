@@ -45,6 +45,8 @@ public class LoginViewModel {
             busy.set(false);
             Throwable ex = t.getException();
             statusMessage.set(ex != null ? ex.getMessage() : "Error al autenticar");
+            // limpiar password para seguridad y UX
+            password.set("");
         });
 
         Thread th = new Thread(t, "login-thread");
