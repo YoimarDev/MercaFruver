@@ -1,8 +1,10 @@
+// File: fruver-infra/src/main/java/com/miempresa/fruver/infra/db/ProductoRepositoryJdbc.java
 package com.miempresa.fruver.infra.db;
 
 import com.miempresa.fruver.domain.model.Producto;
 import com.miempresa.fruver.domain.repository.ProductoRepository;
 import com.miempresa.fruver.domain.exceptions.DataAccessException;
+
 import javax.sql.DataSource;
 import java.sql.*;
 import java.util.*;
@@ -14,7 +16,7 @@ public class ProductoRepositoryJdbc implements ProductoRepository {
 
     @Override
     public Producto save(Producto p) {
-        String sql = "INSERT INTO PRODUCTO(codigo, nombre, precio_unitario, tipo, stock_actual, stock_umb) VALUES (?, ?, ?, ?, ?, ?)";
+        String sql = "INSERT INTO PRODUCTO(codigo, nombre, precio_unitario, tipo, stock_actual, stock_umb, imagen_path) VALUES (?, ?, ?, ?, ?, ?, ?)";
         try (Connection c = ds.getConnection();
              PreparedStatement ps = c.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             c.setAutoCommit(false);
@@ -24,9 +26,12 @@ public class ProductoRepositoryJdbc implements ProductoRepository {
             ps.setString(4, p.getTipo().name());
             ps.setBigDecimal(5, p.getStockActual());
             ps.setBigDecimal(6, p.getStockUmbral());
+            ps.setString(7, p.getImagenPath());
             ps.executeUpdate();
             try (ResultSet rs = ps.getGeneratedKeys()) {
-                if (rs.next()) p = new Producto(rs.getInt(1), p.getCodigo(), p.getNombre(), p.getPrecioUnitario(), p.getTipo(), p.getStockActual(), p.getStockUmbral());
+                if (rs.next()) {
+                    p = new Producto(rs.getInt(1), p.getCodigo(), p.getNombre(), p.getPrecioUnitario(), p.getTipo(), p.getStockActual(), p.getStockUmbral(), p.getImagenPath());
+                }
             }
             c.commit();
             return p;
@@ -48,6 +53,20 @@ public class ProductoRepositoryJdbc implements ProductoRepository {
             }
         } catch (SQLException ex) {
             throw new DataAccessException("Error buscando producto por codigo", ex);
+        }
+    }
+
+    @Override
+    public Optional<Producto> findById(Integer id) {
+        String sql = "SELECT * FROM PRODUCTO WHERE producto_id = ?";
+        try (Connection c = ds.getConnection(); PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setInt(1, id);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) return Optional.of(mapRow(rs));
+                return Optional.empty();
+            }
+        } catch (SQLException ex) {
+            throw new DataAccessException("Error buscando producto por id", ex);
         }
     }
 
@@ -75,11 +94,48 @@ public class ProductoRepositoryJdbc implements ProductoRepository {
         }
     }
 
+    @Override
+    public Producto update(Producto p) {
+        String sql = "UPDATE PRODUCTO SET codigo = ?, nombre = ?, precio_unitario = ?, tipo = ?, stock_actual = ?, stock_umb = ?, imagen_path = ? WHERE producto_id = ?";
+        try (Connection c = ds.getConnection(); PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, p.getCodigo());
+            ps.setString(2, p.getNombre());
+            ps.setBigDecimal(3, p.getPrecioUnitario());
+            ps.setString(4, p.getTipo().name());
+            ps.setBigDecimal(5, p.getStockActual());
+            ps.setBigDecimal(6, p.getStockUmbral());
+            ps.setString(7, p.getImagenPath());
+            ps.setInt(8, p.getProductoId());
+            int updated = ps.executeUpdate();
+            if (updated == 0) throw new DataAccessException("No se encontró producto para actualizar: " + p.getProductoId(), null);
+            // Devolver instancia actualizada (podrías reconsultar si prefieres)
+            return p;
+        } catch (SQLException ex) {
+            throw new DataAccessException("Error actualizando producto", ex);
+        }
+    }
+
+    @Override
+    public void delete(Integer productoId) {
+        String sql = "DELETE FROM PRODUCTO WHERE producto_id = ?";
+        try (Connection c = ds.getConnection(); PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setInt(1, productoId);
+            ps.executeUpdate();
+        } catch (SQLException ex) {
+            throw new DataAccessException("Error eliminando producto", ex);
+        }
+    }
+
     private Producto mapRow(ResultSet rs) throws SQLException {
         return new Producto(
-                rs.getInt("producto_id"), rs.getString("codigo"), rs.getString("nombre"),
-                rs.getBigDecimal("precio_unitario"), Producto.TipoProducto.valueOf(rs.getString("tipo")),
-                rs.getBigDecimal("stock_actual"), rs.getBigDecimal("stock_umb")
+                rs.getInt("producto_id"),
+                rs.getString("codigo"),
+                rs.getString("nombre"),
+                rs.getBigDecimal("precio_unitario"),
+                Producto.TipoProducto.valueOf(rs.getString("tipo")),
+                rs.getBigDecimal("stock_actual"),
+                rs.getBigDecimal("stock_umb"),
+                rs.getString("imagen_path") // puede ser null
         );
     }
 }

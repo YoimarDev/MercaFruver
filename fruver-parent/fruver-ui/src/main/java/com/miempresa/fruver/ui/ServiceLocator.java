@@ -14,9 +14,18 @@ import com.miempresa.fruver.service.usecase.CreateUserUseCase;
 import com.miempresa.fruver.service.usecase.UpdateUserUseCase;
 import com.miempresa.fruver.service.usecase.DeleteUserUseCase;
 
+// --- productos ---
+import com.miempresa.fruver.domain.model.Producto;
+import com.miempresa.fruver.domain.repository.ProductoRepository;
+import com.miempresa.fruver.service.usecase.CreateProductUseCase;
+import com.miempresa.fruver.service.usecase.UpdateProductUseCase;
+import com.miempresa.fruver.service.usecase.DeleteProductUseCase;
+import com.miempresa.fruver.service.usecase.ListProductsUseCase;
+
 import org.mindrot.jbcrypt.BCrypt;
 
 import javax.sql.DataSource;
+import java.math.BigDecimal;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
@@ -41,6 +50,12 @@ public final class ServiceLocator {
     private static volatile CreateUserUseCase createUserUseCase;
     private static volatile UpdateUserUseCase updateUserUseCase;
     private static volatile DeleteUserUseCase deleteUserUseCase;
+
+    // product management usecases
+    private static volatile ListProductsUseCase listProductsUseCase;
+    private static volatile CreateProductUseCase createProductUseCase;
+    private static volatile UpdateProductUseCase updateProductUseCase;
+    private static volatile DeleteProductUseCase deleteProductUseCase;
 
     // Admin service (stubs / fallback)
     private static volatile AdminService adminService;
@@ -79,6 +94,15 @@ public final class ServiceLocator {
             createUserUseCase = new CreateUserUseCase(repoJdbc);
             updateUserUseCase = new UpdateUserUseCase(repoJdbc);
             deleteUserUseCase = new DeleteUserUseCase(repoJdbc);
+
+            // --- ProductoRepository (JDBC) y casos de uso de productos ---
+            com.miempresa.fruver.infra.db.ProductoRepositoryJdbc prodRepoJdbc =
+                    new com.miempresa.fruver.infra.db.ProductoRepositoryJdbc(ds);
+
+            listProductsUseCase = new ListProductsUseCase(prodRepoJdbc);
+            createProductUseCase = new CreateProductUseCase(prodRepoJdbc);
+            updateProductUseCase = new UpdateProductUseCase(prodRepoJdbc);
+            deleteProductUseCase = new DeleteProductUseCase(prodRepoJdbc);
 
             progressMsg.accept("Probando consulta mínima a BD...");
             progressPercent.accept(0.60);
@@ -163,6 +187,17 @@ public final class ServiceLocator {
         updateUserUseCase = new UpdateUserUseCase(inmem);
         deleteUserUseCase = new DeleteUserUseCase(inmem);
 
+        // --- productos en memoria para modo demo ---
+        InMemoryProductoRepository prodMem = new InMemoryProductoRepository();
+
+        // (semilla opcional desactivada para no asumir constructores/campos del dominio)
+        // Si deseas datos demo, puedes guardarlos aquí contra prodMem.save(...)
+
+        listProductsUseCase = new ListProductsUseCase(prodMem);
+        createProductUseCase = new CreateProductUseCase(prodMem);
+        updateProductUseCase = new UpdateProductUseCase(prodMem);
+        deleteProductUseCase = new DeleteProductUseCase(prodMem);
+
         // inicializar adminService in-memory también para que la UI admin funcione
         usingInMemoryAdminService = true;
         adminService = new InMemoryAdminService();
@@ -206,6 +241,35 @@ public final class ServiceLocator {
             throw new IllegalStateException("ServiceLocator no inicializado. Llama a initializeAndTestDb primero.");
         }
         return deleteUserUseCase;
+    }
+
+    // --- getters de productos ---
+    public static ListProductsUseCase getListProductsUseCase() {
+        if (listProductsUseCase == null) {
+            throw new IllegalStateException("ServiceLocator no inicializado. Llama a initializeAndTestDb primero.");
+        }
+        return listProductsUseCase;
+    }
+
+    public static CreateProductUseCase getCreateProductUseCase() {
+        if (createProductUseCase == null) {
+            throw new IllegalStateException("ServiceLocator no inicializado. Llama a initializeAndTestDb primero.");
+        }
+        return createProductUseCase;
+    }
+
+    public static UpdateProductUseCase getUpdateProductUseCase() {
+        if (updateProductUseCase == null) {
+            throw new IllegalStateException("ServiceLocator no inicializado. Llama a initializeAndTestDb primero.");
+        }
+        return updateProductUseCase;
+    }
+
+    public static DeleteProductUseCase getDeleteProductUseCase() {
+        if (deleteProductUseCase == null) {
+            throw new IllegalStateException("ServiceLocator no inicializado. Llama a initializeAndTestDb primero.");
+        }
+        return deleteProductUseCase;
     }
 
     /* ----------------------
@@ -631,6 +695,104 @@ public final class ServiceLocator {
             }
             store.put(u.getUsuarioId(), u);
             return u;
+        }
+    }
+
+    /* ---------------------------
+       In-memory ProductoRepository
+       --------------------------- */
+    private static class InMemoryProductoRepository implements ProductoRepository {
+        private final Map<Integer, Producto> byId = new ConcurrentHashMap<>();
+        private final Map<String, Integer> idByCode = new ConcurrentHashMap<>();
+        private final AtomicInteger seq = new AtomicInteger(1);
+
+        @Override
+        public Producto save(Producto p) {
+            Integer id = seq.getAndIncrement();
+
+            // evitar códigos duplicados
+            if (p.getCodigo() != null) {
+                Integer existing = idByCode.get(p.getCodigo());
+                if (existing != null) {
+                    throw new IllegalArgumentException("Código ya existe: " + p.getCodigo());
+                }
+            }
+
+            Producto toStore = new Producto(
+                    id, p.getCodigo(), p.getNombre(),
+                    p.getPrecioUnitario(), p.getTipo(),
+                    p.getStockActual(), p.getStockUmbral()
+            );
+            byId.put(id, toStore);
+            if (p.getCodigo() != null) idByCode.put(p.getCodigo(), id);
+            return toStore;
+        }
+
+        @Override
+        public Producto update(Producto p) {
+            Integer id = p.getProductoId();
+            if (id == null || !byId.containsKey(id)) {
+                throw new IllegalArgumentException("Producto no existe: " + id);
+            }
+
+            // si cambia el código, mantener consistencia del índice
+            String oldCode = byId.get(id).getCodigo();
+            String newCode = p.getCodigo();
+
+            if (newCode != null && !newCode.equals(oldCode)) {
+                Integer clash = idByCode.get(newCode);
+                if (clash != null && !clash.equals(id)) {
+                    throw new IllegalArgumentException("Código ya existe: " + newCode);
+                }
+                if (oldCode != null) idByCode.remove(oldCode);
+                idByCode.put(newCode, id);
+            }
+
+            Producto updated = new Producto(
+                    id, newCode, p.getNombre(),
+                    p.getPrecioUnitario(), p.getTipo(),
+                    p.getStockActual(), p.getStockUmbral()
+            );
+            byId.put(id, updated);
+            return updated;
+        }
+
+        @Override
+        public Optional<Producto> findByCodigo(String codigo) {
+            if (codigo == null) return Optional.empty();
+            Integer id = idByCode.get(codigo);
+            return id == null ? Optional.empty() : Optional.ofNullable(byId.get(id));
+        }
+
+        @Override
+        public Optional<Producto> findById(Integer id) {
+            return Optional.ofNullable(byId.get(id));
+        }
+
+        @Override
+        public java.util.List<Producto> findAll() {
+            return new ArrayList<>(byId.values());
+        }
+
+        @Override
+        public void delete(Integer id) {
+            if (id == null) return;
+            Producto removed = byId.remove(id);
+            if (removed != null && removed.getCodigo() != null) {
+                idByCode.remove(removed.getCodigo());
+            }
+        }
+
+        @Override
+        public void updateStock(Integer productoId, BigDecimal newStock) {
+            Producto p = byId.get(productoId);
+            if (p == null) throw new IllegalArgumentException("Producto no existe: " + productoId);
+            Producto updated = new Producto(
+                    p.getProductoId(), p.getCodigo(), p.getNombre(),
+                    p.getPrecioUnitario(), p.getTipo(),
+                    newStock, p.getStockUmbral()
+            );
+            byId.put(productoId, updated);
         }
     }
 }

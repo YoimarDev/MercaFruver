@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.image.ImageView?>
+<?import javafx.geometry.Insets?>
+
+<BorderPane xmlns:fx="http://javafx.com/fxml"
+            fx:controller="com.miempresa.fruver.ui.controller.SupervisorController"
+            stylesheets="@/css/styles.css" prefWidth="1200" prefHeight="800">
+
+    <!-- TOP -->
+    <top>
+        <HBox styleClass="topbar" alignment="CENTER_LEFT" spacing="8">
+            <padding>
+                <Insets top="8" left="12" right="12" bottom="8"/>
+            </padding>
+            <Label text="Merca Fruver C.Y.E. — Supervisor" styleClass="brand"/>
+            <Region HBox.hgrow="ALWAYS"/>
+            <Button fx:id="btnSalir" text="Salir" onAction="#onSalir" styleClass="primary-button" minWidth="120"/>
+        </HBox>
+    </top>
+
+    <!-- CENTER: split lista / formulario -->
+    <center>
+        <SplitPane orientation="HORIZONTAL" dividerPositions="0.45">
+            <items>
+
+                <!-- Left: lista y filtro -->
+                <VBox spacing="8" prefWidth="520">
+                    <padding>
+                        <Insets top="12" right="12" bottom="12" left="12"/>
+                    </padding>
+
+                    <HBox spacing="8">
+                        <TextField fx:id="txtFiltro" promptText="Buscar producto..." HBox.hgrow="ALWAYS"/>
+                        <Button fx:id="btnNuevoProducto" text="Nuevo" onAction="#onNuevoProducto" styleClass="primary-button"/>
+                    </HBox>
+
+                    <ListView fx:id="lvProductos" prefHeight="560" />
+                </VBox>
+
+                <!-- Right: formulario -->
+                <VBox spacing="10">
+                    <padding>
+                        <Insets top="12" right="12" bottom="12" left="12"/>
+                    </padding>
+
+                    <Label text="Detalles del Producto" style="-fx-font-size:18px; -fx-font-weight:600;"/>
+
+                    <GridPane hgap="8" vgap="8">
+                        <columnConstraints>
+                            <ColumnConstraints percentWidth="30"/>
+                            <ColumnConstraints percentWidth="70"/>
+                        </columnConstraints>
+
+                        <Label text="Código:" GridPane.rowIndex="0" GridPane.columnIndex="0"/>
+                        <TextField fx:id="txtCodigo" GridPane.rowIndex="0" GridPane.columnIndex="1"/>
+
+                        <Label text="Nombre:" GridPane.rowIndex="1" GridPane.columnIndex="0"/>
+                        <TextField fx:id="txtNombre" GridPane.rowIndex="1" GridPane.columnIndex="1"/>
+
+                        <Label text="Tipo:" GridPane.rowIndex="2" GridPane.columnIndex="0"/>
+                        <ComboBox fx:id="cbTipo" GridPane.rowIndex="2" GridPane.columnIndex="1"/>
+
+                        <Label text="Precio (unidad):" GridPane.rowIndex="3" GridPane.columnIndex="0"/>
+                        <TextField fx:id="txtPrecio" GridPane.rowIndex="3" GridPane.columnIndex="1"/>
+
+                        <Label text="Stock (actual):" GridPane.rowIndex="4" GridPane.columnIndex="0"/>
+                        <TextField fx:id="txtStock" GridPane.rowIndex="4" GridPane.columnIndex="1"/>
+
+                        <Label text="Stock UMB:" GridPane.rowIndex="5" GridPane.columnIndex="0"/>
+                        <TextField fx:id="txtStockUmb" GridPane.rowIndex="5" GridPane.columnIndex="1"/>
+
+                        <Label text="Imagen:" GridPane.rowIndex="6" GridPane.columnIndex="0"/>
+                        <HBox spacing="8" GridPane.rowIndex="6" GridPane.columnIndex="1">
+                            <ImageView fx:id="ivImagen" fitWidth="120" fitHeight="80" preserveRatio="true"/>
+                            <VBox spacing="6">
+                                <Button fx:id="btnSubirImagen" text="Subir..." onAction="#onSubirImagen" />
+                                <Label fx:id="lblImagenPath" wrapText="true"/>
+                            </VBox>
+                        </HBox>
+                    </GridPane>
+
+                    <HBox spacing="10" alignment="CENTER_LEFT">
+                        <Button fx:id="btnCrear" text="Crear" onAction="#onCrear" styleClass="primary-button" minWidth="110"/>
+                        <Button fx:id="btnActualizar" text="Actualizar" onAction="#onActualizar" styleClass="primary-button" minWidth="110"/>
+                        <Button fx:id="btnEliminar" text="Eliminar" onAction="#onEliminar" styleClass="danger-button" minWidth="110"/>
+                        <Region HBox.hgrow="ALWAYS"/>
+                        <Label fx:id="lblStatus" wrapText="true"/>
+                    </HBox>
+                </VBox>
+
+            </items>
+        </SplitPane>
+    </center>
+
+    <!-- BOTTOM -->
+    <bottom>
+        <HBox alignment="CENTER_RIGHT">
+            <padding>
+                <Insets top="10" right="12" bottom="10" left="12"/>
+            </padding>
+            <Label text="Supervisor • fruver" styleClass="version-label"/>
+        </HBox>
+    </bottom>
+</BorderPane>
