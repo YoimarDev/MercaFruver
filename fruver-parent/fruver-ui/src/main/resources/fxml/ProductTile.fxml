@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?import javafx.scene.layout.VBox?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
+<?import javafx.scene.image.ImageView?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.Button?>
+
+<VBox xmlns:fx="http://javafx.com/fxml"
+      fx:controller="com.miempresa.fruver.ui.widge.ProductTileController"
+      fx:id="root"
+      spacing="6"
+      prefWidth="230"
+      prefHeight="110"
+      styleClass="user-tile-root">
+
+    <!-- Imagen -->
+    <ImageView fx:id="imgProduct" fitWidth="64" fitHeight="64" preserveRatio="true"/>
+
+    <!-- Nombre -->
+    <Label fx:id="lblName" styleClass="user-tile-name"/>
+
+    <!-- Meta: precio + codigo/otra info -->
+    <Label fx:id="lblMeta" styleClass="product-meta"/>
+
+    <!-- Badge + Add button -->
+    <HBox spacing="8">
+        <Label fx:id="lblBadge" styleClass="product-type-badge"/>
+        <Region HBox.hgrow="ALWAYS"/>
+        <Button fx:id="btnAdd" text="Agregar" styleClass="primary-button" minWidth="80"/>
+    </HBox>
+
+</VBox>

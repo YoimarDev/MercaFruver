@@ -24,6 +24,9 @@ import com.miempresa.fruver.service.usecase.ListProductsUseCase;
 // estadísticas (usecase conocido)
 import com.miempresa.fruver.service.usecase.ObtenerEstadisticasUseCase;
 
+// nuevo: RegistrarVentaUseCase
+import com.miempresa.fruver.service.usecase.RegistrarVentaUseCase;
+
 import org.mindrot.jbcrypt.BCrypt;
 
 import javax.sql.DataSource;
@@ -43,6 +46,9 @@ import java.util.function.Consumer;
  * - Inicializa usecases principales (login, usuarios, productos) en modo JDBC o in-memory.
  * - Intenta crear y registrar ObtenerEstadisticasUseCase automáticamente si encuentra VentaRepositoryJdbc.
  * - Expone AdminService (JdbcAdminService / InMemoryAdminService).
+ *
+ * Nota: este fichero mantiene TU implementación original y se extiende con getters/registradores no invasivos
+ * para RegistrarVentaUseCase para que la UI (Cajero) pueda recuperar/inyectar el usecase.
  */
 public final class ServiceLocator {
 
@@ -61,6 +67,9 @@ public final class ServiceLocator {
 
     // Estadísticas (opcional/inyectable)
     private static volatile ObtenerEstadisticasUseCase obtenerEstadisticasUseCase;
+
+    // RegistrarVentaUseCase (opcional/inyectable para el Cajero)
+    private static volatile RegistrarVentaUseCase registrarVentaUseCase;
 
     // Admin service
     private static volatile AdminService adminService;
@@ -307,6 +316,25 @@ public final class ServiceLocator {
      */
     public static void registerObtenerEstadisticasUseCase(ObtenerEstadisticasUseCase uc) {
         obtenerEstadisticasUseCase = uc;
+    }
+
+    /* ---------------------- RegistrarVentaUseCase exposure ---------------------- */
+
+    /**
+     * Retorna RegistrarVentaUseCase si fue registrado; lanza una excepción informativa si no existe.
+     */
+    public static RegistrarVentaUseCase getRegistrarVentaUseCase() {
+        if (registrarVentaUseCase == null) {
+            throw new IllegalStateException("RegistrarVentaUseCase no registrado. Llama a ServiceLocator.registerRegistrarVentaUseCase(...) durante la inicialización del sistema.");
+        }
+        return registrarVentaUseCase;
+    }
+
+    /**
+     * Permite registrar/injectar RegistrarVentaUseCase para que la UI (Cajero) y otros componentes lo consuman.
+     */
+    public static void registerRegistrarVentaUseCase(RegistrarVentaUseCase uc) {
+        registrarVentaUseCase = uc;
     }
 
     /* ---------------------- AdminService exposure ---------------------- */

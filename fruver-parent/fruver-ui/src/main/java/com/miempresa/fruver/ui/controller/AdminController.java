@@ -23,7 +23,7 @@ import java.util.Optional;
 /**
  * Controller para la vista Admin.
  * - gestiona configuración de dispositivos y gestión de usuarios.
- * - mejoras visuales: cellFactory amigable, notificaciones no intrusivas.
+ *
  */
 public class AdminController {
 

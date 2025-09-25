@@ -1,0 +1,171 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.text.Font?>
+
+<BorderPane xmlns:fx="http://javafx.com/fxml"
+            fx:controller="com.miempresa.fruver.ui.controller.CajeroController"
+            stylesheets="@/css/styles.css"
+            prefWidth="1280" prefHeight="800">
+
+    <!-- TOPBAR -->
+    <top>
+        <HBox styleClass="topbar" alignment="CENTER_LEFT" spacing="8">
+            <padding>
+                <Insets top="10" right="12" bottom="10" left="12"/>
+            </padding>
+
+            <VBox spacing="2">
+                <Label text="Merca Fruver C.Y.E." styleClass="brand"/>
+                <Label fx:id="lblWelcome" text="Caja · Bienvenido" styleClass="welcome-label"/>
+            </VBox>
+
+            <Region HBox.hgrow="ALWAYS"/>
+
+            <HBox spacing="8" alignment="CENTER_RIGHT">
+                <Label text="Buscar:"/>
+                <TextField fx:id="txtFilter" promptText="Buscar producto por nombre..." prefWidth="320" />
+            </HBox>
+
+            <Region HBox.hgrow="ALWAYS"/>
+
+            <HBox spacing="12" alignment="CENTER_RIGHT">
+                <VBox spacing="2" alignment="CENTER">
+                    <Label text="Báscula:" style="-fx-font-size:11px;"/>
+                    <Label fx:id="lblScaleStatus" text="Desconocido" styleClass="device-indicator"/>
+                </VBox>
+                <VBox spacing="2" alignment="CENTER">
+                    <Label text="Lector:" style="-fx-font-size:11px;"/>
+                    <Label fx:id="lblReaderStatus" text="Desconocido" styleClass="device-indicator"/>
+                </VBox>
+
+                <Button fx:id="btnSalir" text="Salir" onAction="#onSalir" styleClass="primary-button" minWidth="120"/>
+            </HBox>
+        </HBox>
+    </top>
+
+    <!-- CENTER: productos (izq) / carrito (der) -->
+    <center>
+        <SplitPane orientation="HORIZONTAL" dividerPositions="0.66">
+            <items>
+
+                <VBox spacing="8" prefWidth="760">
+                    <padding>
+                        <Insets top="12" right="12" bottom="12" left="12"/>
+                    </padding>
+
+                    <Label text="Productos" style="-fx-font-size:18px; -fx-font-weight:600;"/>
+
+                    <HBox spacing="8" alignment="CENTER_LEFT">
+                        <Label text="Categoría:"/>
+                        <ComboBox fx:id="cbCategoria" promptText="Todas" prefWidth="160"/>
+                        <Region HBox.hgrow="ALWAYS"/>
+
+                        <ToggleButton fx:id="tbOnlyPeso" text="Solo PESO">
+                            <tooltip>
+                                <Tooltip text="Mostrar sólo productos por peso"/>
+                            </tooltip>
+                        </ToggleButton>
+                    </HBox>
+
+                    <ScrollPane fitToWidth="true" fitToHeight="true" prefHeight="600">
+                        <content>
+                            <TilePane fx:id="tileProducts"
+                                      prefColumns="4"
+                                      hgap="12" vgap="12"
+                                      tileAlignment="TOP_LEFT">
+                                <padding>
+                                    <Insets top="12" right="12" bottom="12" left="12"/>
+                                </padding>
+                            </TilePane>
+                        </content>
+                    </ScrollPane>
+
+                    <HBox spacing="8" alignment="CENTER_LEFT">
+                        <Label text="Lectura de peso:"/>
+                        <Label fx:id="lblLastWeight" text="-- kg" style="-fx-font-weight:700; -fx-font-size:16px;"/>
+                        <Region HBox.hgrow="ALWAYS"/>
+                        <Button fx:id="btnRefreshProducts" text="Actualizar" styleClass="ghost-button" onAction="#onRefreshProducts"/>
+                    </HBox>
+                </VBox>
+
+                <VBox spacing="12" prefWidth="420">
+                    <padding>
+                        <Insets top="12" right="12" bottom="12" left="12"/>
+                    </padding>
+
+                    <Label text="Carrito" style="-fx-font-size:18px; -fx-font-weight:600;"/>
+
+                    <ListView fx:id="lvCart" prefHeight="360">
+                        <tooltip>
+                            <Tooltip text="Toca una línea para editar o eliminar."/>
+                        </tooltip>
+                    </ListView>
+
+                    <GridPane hgap="8" vgap="8">
+                        <columnConstraints>
+                            <ColumnConstraints percentWidth="50"/>
+                            <ColumnConstraints percentWidth="50"/>
+                        </columnConstraints>
+
+                        <Label text="SubTotal:" GridPane.rowIndex="0" GridPane.columnIndex="0"/>
+                        <!-- sin $ literal aquí -->
+                        <Label fx:id="lblSubtotal" text="0.00" GridPane.rowIndex="0" GridPane.columnIndex="1" style="-fx-font-weight:700;"/>
+
+                        <Label text="IVA (opc):" GridPane.rowIndex="1" GridPane.columnIndex="0"/>
+                        <Label fx:id="lblIva" text="0.00" GridPane.rowIndex="1" GridPane.columnIndex="1"/>
+
+                        <Label text="Total:" GridPane.rowIndex="2" GridPane.columnIndex="0"/>
+                        <Label fx:id="lblTotal" text="0.00" GridPane.rowIndex="2" GridPane.columnIndex="1" style="-fx-font-size:16px; -fx-font-weight:800;"/>
+                    </GridPane>
+
+                    <HBox spacing="8" alignment="CENTER">
+                        <Button fx:id="btnEditLine" text="Editar" styleClass="ghost-button" minWidth="100" onAction="#onEditLine"/>
+                        <Button fx:id="btnRemoveLine" text="Eliminar" styleClass="danger-button" minWidth="100" onAction="#onRemoveLine"/>
+                        <Button fx:id="btnClearCart" text="Limpiar" styleClass="ghost-button" minWidth="100" onAction="#onClearCart"/>
+                    </HBox>
+
+                    <Separator/>
+
+                    <VBox spacing="8">
+                        <Label text="Cobro" style="-fx-font-weight:700;"/>
+                        <FlowPane fx:id="flowBills" hgap="6" vgap="6" prefWrapLength="360"/>
+
+                        <HBox spacing="8" alignment="CENTER_LEFT">
+                            <Label text="Recibido:"/>
+                            <!-- promptText sin $ -->
+                            <TextField fx:id="txtReceived" promptText="0.00" prefWidth="160"/>
+                            <Button fx:id="btnExact" text="Exacto" styleClass="ghost-button" onAction="#onExactReceived">
+                                <tooltip>
+                                    <Tooltip text="Usar el total como recibido"/>
+                                </tooltip>
+                            </Button>
+                        </HBox>
+
+                        <HBox spacing="8" alignment="CENTER_LEFT">
+                            <Label text="Vuelto:"/>
+                            <!-- sin $ -->
+                            <Label fx:id="lblChange" text="0.00" style="-fx-font-weight:700; -fx-font-size:16px;"/>
+                            <Region HBox.hgrow="ALWAYS"/>
+                            <Button fx:id="btnCharge" text="Cobrar" styleClass="primary-button" minWidth="120" onAction="#onCharge"/>
+                        </HBox>
+                    </VBox>
+
+                    <Label fx:id="lblMessage" wrapText="true"/>
+                </VBox>
+
+            </items>
+        </SplitPane>
+    </center>
+
+    <bottom>
+        <HBox alignment="CENTER_RIGHT">
+            <padding>
+                <Insets top="10" right="12" bottom="10" left="12"/>
+            </padding>
+            <Label text="Cajero • fruver" styleClass="version-label"/>
+        </HBox>
+    </bottom>
+
+</BorderPane>

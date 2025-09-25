@@ -5,20 +5,25 @@ import com.fazecast.jSerialComm.SerialPortDataListener;
 import com.fazecast.jSerialComm.SerialPortEvent;
 import com.miempresa.fruver.domain.exceptions.DataAccessException;
 
-import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * ScaleService event-driven y responsive.
- * - Listener en background que parsea tramas STX(0x02) ... ETX(0x03)
- * - readWeightKg() envía request (si está configurado) y espera la siguiente trama
- * - getLastWeightKg() devuelve la última lectura conocida inmediatamente
+ * ScaleService — versión con reintentos/backoff y cierre forzado en nueva instancia
+ * para mitigar casos en los que el driver/OS mantiene handles nativos entre open/close.
+ *
+ * Conserva firmas públicas originales y comportamiento observable.
  */
 public class ScaleService {
+    private static final ConcurrentHashMap<String, ReentrantLock> PORT_LOCKS = new ConcurrentHashMap<>();
+
     private SerialPort port;
     private InputStream in;
     private OutputStream out;
@@ -30,10 +35,15 @@ public class ScaleService {
     private SerialPortDataListener listener;
 
     // configuración
-    private String requestCommand = "96814C"; // comando que solicita peso; si "" -> modo streaming
+    private String requestCommand = "96814C";
     private int readTimeoutMs = 1500;
     private boolean debug = false;
-    private final int openAttempts = 3;
+    // aumentamos intentos por defecto
+    private final int openAttempts = 6;
+
+    // lock que esta instancia adquirió (si lo hizo)
+    private ReentrantLock heldLock;
+    private String heldPortName;
 
     public ScaleService() {
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -50,55 +60,144 @@ public class ScaleService {
             if (debug) System.out.println("ScaleService: puerto ya abierto " + portName);
             return;
         }
+        // intentar cerrar cualquier estado anterior
         close();
 
-        port = SerialPort.getCommPort(portName);
-        if (port == null) throw new DataAccessException("Puerto no encontrado: " + portName);
-
-        // configuración básica
-        port.setBaudRate(baudRate);
-        port.setNumDataBits(8);
-        port.setNumStopBits(SerialPort.ONE_STOP_BIT);
-        port.setParity(SerialPort.NO_PARITY);
-        port.setFlowControl(SerialPort.FLOW_CONTROL_DISABLED);
-
-        boolean opened = false;
-        for (int i = 1; i <= openAttempts; i++) {
-            if (port.isOpen()) {
-                try { port.closePort(); } catch (Throwable ignored) {}
-            }
-            port.clearDTR(); port.clearRTS(); sleep(100);
-            port.setDTR(); port.setRTS(); sleep(100);
-
-            if (port.openPort(1500)) {
-                opened = true;
-                break;
-            }
-            sleep(200);
+        // esperar hasta que el driver reporte que el puerto quedó cerrado (pequeño timeout)
+        long waitStart = System.currentTimeMillis();
+        long waitTimeout = 2200; // ms total máximo
+        while (System.currentTimeMillis() - waitStart < waitTimeout) {
+            try {
+                SerialPort probe = SerialPort.getCommPort(portName);
+                boolean stillOpen = false;
+                try { stillOpen = probe.isOpen(); } catch (Throwable ignored) {}
+                if (!stillOpen) break;
+            } catch (Throwable ignored) {}
+            sleep(120);
         }
-        if (!opened) throw new DataAccessException("No se pudo abrir puerto tras " + openAttempts + " intentos: " + portName);
 
-        // streams
+        ReentrantLock lock = PORT_LOCKS.computeIfAbsent(portName, p -> new ReentrantLock());
+        boolean locked = false;
         try {
-            in = port.getInputStream();
-            out = port.getOutputStream();
-        } catch (Exception ex) {
-            throw new DataAccessException("Error obteniendo streams del puerto: " + ex.getMessage(), ex);
+            locked = lock.tryLock(2000, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
         }
+        if (!locked) {
+            throw new DataAccessException("Puerto ocupado por otra operación: " + portName);
+        }
+        this.heldLock = lock;
+        this.heldPortName = portName;
 
-        // purge razonable al abrir (no en cada lectura)
-        purgeOnOpen();
+        try {
+            port = SerialPort.getCommPort(portName);
+            if (port == null) throw new DataAccessException("Puerto no encontrado: " + portName);
 
-        // instalar listener (event-driven)
-        installListener();
+            port.setBaudRate(baudRate);
+            port.setNumDataBits(8);
+            port.setNumStopBits(SerialPort.ONE_STOP_BIT);
+            port.setParity(SerialPort.NO_PARITY);
+            port.setFlowControl(SerialPort.FLOW_CONTROL_DISABLED);
 
-        if (debug) System.out.println("ScaleService: puerto abierto " + portName + "@" + baudRate);
+            boolean opened = false;
+            // backoff exponencial sencillo
+            for (int i = 1; i <= openAttempts; i++) {
+                // attempt-specific pre-open reset
+                try { port.clearDTR(); port.clearRTS(); } catch (Throwable ignored) {}
+                sleep(60);
+                try { port.setDTR(); port.setRTS(); } catch (Throwable ignored) {}
+                sleep(60);
+
+                port.setComPortTimeouts(SerialPort.TIMEOUT_NONBLOCKING, 0, 0);
+
+                // intentamos abrir con timeout creciente
+                int openTimeout = 1500 + (i - 1) * 500; // 1500, 2000, 2500...
+                if (debug) System.out.println("ScaleService: intentando open() intento=" + i + " timeout=" + openTimeout);
+                try {
+                    if (port.openPort(openTimeout)) {
+                        opened = true;
+                        if (debug) System.out.println("ScaleService: openPort() succeeded on attempt " + i);
+                        break;
+                    } else {
+                        if (debug) System.out.println("ScaleService: openPort() returned false on attempt " + i);
+                    }
+                } catch (Throwable t) {
+                    if (debug) System.err.println("ScaleService: openPort() exception attempt " + i + " -> " + t.getMessage());
+                }
+
+                // si no abrió, hacemos safe purge/toggle y esperamos backoff
+                try {
+                    safePurge();
+                } catch (Throwable ignored) {}
+                long backoff = 120L * i; // leve aumento
+                sleep(backoff + 80);
+            }
+
+            // Si no se abrió con los intentos normales, intentar cierre forzado vía una nueva instancia SerialPort
+            if (!opened) {
+                if (debug) System.out.println("ScaleService: no abierto tras intentos regulares, intentando cierre forzado externo...");
+                try {
+                    SerialPort alt = SerialPort.getCommPort(portName);
+                    try {
+                        // intentar flush/close en nueva instancia
+                        try { alt.flushIOBuffers(); } catch (Throwable ignored) {}
+                        try { alt.closePort(); } catch (Throwable ignored) {}
+                        // intentar abrir y cerrar rápidamente para "resetear" el driver
+                        try {
+                            if (alt.openPort(800)) {
+                                sleep(80);
+                                try { alt.closePort(); } catch (Throwable ignored) {}
+                            }
+                        } catch (Throwable ignored) {}
+                    } finally {
+                        // asegurar que alt sea descartado
+                        try { alt.closePort(); } catch (Throwable ignored) {}
+                    }
+                    // darle tiempo al OS/driver
+                    sleep(300);
+                } catch (Throwable ignored) {}
+                // reintentar abrir unas veces más con mayor espera
+                for (int j = 1; j <= 3 && !opened; j++) {
+                    try {
+                        if (debug) System.out.println("ScaleService: reintento forzado " + j + " para openPort()");
+                        if (port.openPort(2000)) {
+                            opened = true;
+                            break;
+                        }
+                    } catch (Throwable t) {
+                        if (debug) System.err.println("ScaleService: reintento exception -> " + t.getMessage());
+                    }
+                    sleep(250 + j * 200);
+                }
+            }
+
+            if (!opened) throw new DataAccessException("No se pudo abrir puerto tras " + openAttempts + " intentos: " + portName);
+
+            // obtener streams
+            try {
+                in = port.getInputStream();
+                out = port.getOutputStream();
+            } catch (Exception ex) {
+                throw new DataAccessException("Error obteniendo streams del puerto: " + ex.getMessage(), ex);
+            }
+
+            // purga y listener
+            safePurge();
+            installListener();
+
+            if (debug) System.out.println("ScaleService: puerto abierto " + portName + "@" + baudRate);
+        } catch (DataAccessException dae) {
+            try { close(); } catch (Throwable ignored) {}
+            throw dae;
+        } catch (Throwable t) {
+            try { close(); } catch (Throwable ignored) {}
+            throw new DataAccessException("Error abriendo puerto: " + t.getMessage(), t);
+        }
     }
 
     private void installListener() {
-        // remover antes si existe
         if (listener != null) {
-            try { port.removeDataListener(); } catch (Throwable ignored) {}
+            try { if (port != null) port.removeDataListener(); } catch (Throwable ignored) {}
             listener = null;
         }
 
@@ -119,7 +218,6 @@ public class ScaleService {
                     if (debug) System.out.println("ScaleService: raw incoming -> [" + s.replace("\r","\u00B6").replace("\n","\u00B7") + "]");
                     synchronized (buffer) {
                         buffer.append(s);
-                        // buscar tramas STX..ETX
                         while (true) {
                             int stx = buffer.indexOf("\u0002");
                             if (stx < 0) break;
@@ -129,7 +227,6 @@ public class ScaleService {
                             buffer.delete(0, etx + 1);
                             handlePayload(payload);
                         }
-                        // también intentar líneas terminadas en \n si no usa STX/ETX
                         int nl;
                         while ((nl = buffer.indexOf("\n")) >= 0) {
                             String line = buffer.substring(0, nl).trim();
@@ -142,7 +239,11 @@ public class ScaleService {
                 }
             }
         };
-        port.addDataListener(listener);
+        try {
+            port.addDataListener(listener);
+        } catch (Throwable t) {
+            if (debug) System.err.println("ScaleService: fallo al agregar listener: " + t.getMessage());
+        }
     }
 
     private void handlePayload(String payload) {
@@ -152,36 +253,26 @@ public class ScaleService {
         try {
             double kg = Double.parseDouble(cleaned);
             lastKg = kg;
-            // offer without blocking
             queue.offer(cleaned);
         } catch (NumberFormatException nfe) {
             if (debug) System.err.println("ScaleService: parse error payload='" + cleaned + "'");
         }
     }
 
-    /**
-     * Método principal que usa UI: envía request (si está configurado) y espera la siguiente trama.
-     * Si no hay requestCommand (streaming), devuelve el último valor conocido de inmediato.
-     */
     public synchronized double readWeightKg() {
         if (port == null || !port.isOpen()) throw new DataAccessException("Puerto no abierto");
 
         try {
-            // Si hay requestCommand -> pedir nueva lectura y esperar próxima trama
             if (requestCommand != null && !requestCommand.isBlank()) {
-                // vaciar cola de mensajes previos (no bloquear)
                 queue.clear();
-
-                // enviar request
                 try {
                     out.write(requestCommand.getBytes(StandardCharsets.US_ASCII));
                     out.flush();
                     if (debug) System.out.println("ScaleService: request enviado -> " + requestCommand);
-                } catch (IOException ioe) {
+                } catch (Exception ioe) {
                     if (debug) System.err.println("ScaleService: fallo al enviar request: " + ioe.getMessage());
                 }
 
-                // esperar la próxima trama parseada por el listener
                 String msg = queue.poll(readTimeoutMs, TimeUnit.MILLISECONDS);
                 if (msg != null) {
                     try {
@@ -189,19 +280,15 @@ public class ScaleService {
                         lastKg = kg;
                         return kg;
                     } catch (NumberFormatException ex) {
-                        // si no parsea, fallback a lastKg si existe
                         if (lastKg != null) return lastKg;
                         throw new DataAccessException("Respuesta inválida de báscula: " + msg);
                     }
                 } else {
-                    // timeout: si tenemos lastKg retornarlo como fallback
                     if (lastKg != null) return lastKg;
                     throw new DataAccessException("Timeout esperando respuesta de báscula (" + readTimeoutMs + "ms)");
                 }
             } else {
-                // modo streaming: devolver el último valor conocido inmediatamente
                 if (lastKg != null) return lastKg;
-                // si no hay ninguno, intentar esperar muy poco por la cola
                 String msg = queue.poll(200, TimeUnit.MILLISECONDS);
                 if (msg != null) {
                     double kg = Double.parseDouble(msg);
@@ -231,41 +318,173 @@ public class ScaleService {
 
     public synchronized void close() {
         try {
+            // remover listener primero
             if (port != null && listener != null) {
                 try { port.removeDataListener(); } catch (Throwable ignored) {}
+                // dar margen para que driver procese la remoción
+                sleep(80);
                 listener = null;
             }
         } catch (Throwable ignored) {}
+
+        // cerrar streams
         try { if (in != null) { try { in.close(); } catch (Throwable ignored) {} in = null; } } catch (Throwable ignored) {}
         try { if (out != null) { try { out.close(); } catch (Throwable ignored) {} out = null; } } catch (Throwable ignored) {}
+
+        // intentar cerrar el puerto de forma robusta y esperar a que realmente quede cerrado
         try {
             if (port != null) {
-                try { if (port.isOpen()) { try { port.flushIOBuffers(); } catch (Throwable ignored) {} port.closePort(); } } catch (Throwable ignored) {}
-                port = null;
+                try {
+                    safePurge();
+                } catch (Throwable ignored) {}
+                try {
+                    if (port.isOpen()) {
+                        try {
+                            port.flushIOBuffers();
+                        } catch (Throwable ignored) {}
+                        boolean closed = false;
+                        try {
+                            closed = port.closePort();
+                        } catch (Throwable ignored) {}
+                        // esperar un poco más (hasta ~2s) para que libere handle
+                        int tries = 0;
+                        while (port.isOpen() && tries < 20) { // 20 * 100ms = 2s máximo
+                            sleep(100);
+                            tries++;
+                        }
+                        if (debug) System.out.println("ScaleService: close() - closed flag=" + closed + " isOpen=" + port.isOpen());
+                    }
+                } catch (Throwable t) {
+                    if (debug) System.err.println("ScaleService: error cerrando puerto: " + t.getMessage());
+                } finally {
+                    try { port = null; } catch (Throwable ignored) {}
+                }
             }
         } catch (Throwable ignored) {}
-        if (debug) System.out.println("ScaleService: closed");
+
+        // Intento extra: crear nueva instancia SerialPort y forzar close (ayuda cuando handle quedó fuera de esta instancia)
+        if (heldPortName != null) {
+            try {
+                SerialPort alt = SerialPort.getCommPort(heldPortName);
+                try {
+                    try { alt.flushIOBuffers(); } catch (Throwable ignored) {}
+                    try { alt.closePort(); } catch (Throwable ignored) {}
+                } finally {
+                    try { alt.closePort(); } catch (Throwable ignored) {}
+                }
+                // pequeño margen para driver
+                sleep(150);
+                if (debug) System.out.println("ScaleService: attempted external close on " + heldPortName);
+            } catch (Throwable t) {
+                if (debug) System.err.println("ScaleService: external close attempt failed: " + t.getMessage());
+            }
+        }
+
+        // segundo intento más agresivo para asegurar liberación de handles
+        try {
+            forceReleasePort(heldPortName);
+        } catch (Throwable ignored) {}
+
+        // liberar lock siempre que podamos (capturando IllegalMonitorState si se da)
+        try {
+            if (heldLock != null) {
+                try {
+                    heldLock.unlock();
+                } catch (IllegalMonitorStateException ims) {
+                    if (debug) System.err.println("ScaleService: unlock -> IllegalMonitorStateException (ignored).");
+                } catch (Throwable t) {
+                    if (debug) System.err.println("ScaleService: unlock -> " + t.getMessage());
+                }
+            }
+        } catch (Throwable ignored) {}
+
+        heldLock = null;
+        heldPortName = null;
+
+        if (debug) System.out.println("ScaleService: closed (heldPort=" + heldPortName + ")");
     }
 
-    private void purgeOnOpen() {
-        // intento simple: flushIOBuffers + small drain
+    private void safePurge() {
+        if (port == null) return;
+        try {
+            // Intentar invocar purgePort(int) y las constantes mediante reflection
+            Method purgeMethod = port.getClass().getMethod("purgePort", int.class);
+            int flags = 0;
+            try {
+                Field f1 = port.getClass().getField("PURGE_RXCLEAR");
+                Field f2 = port.getClass().getField("PURGE_TXCLEAR");
+                Object v1 = f1.get(null);
+                Object v2 = f2.get(null);
+                if (v1 instanceof Number) flags |= ((Number) v1).intValue();
+                if (v2 instanceof Number) flags |= ((Number) v2).intValue();
+            } catch (Throwable ignored) {
+                // si no existen las constantes, dejar flags=0
+            }
+            try {
+                purgeMethod.invoke(port, flags);
+                if (debug) System.out.println("ScaleService: safePurge -> purgePort invoked (flags=" + flags + ")");
+                return;
+            } catch (Throwable t) {
+                // ignore and fallback
+            }
+        } catch (Throwable ignored) {
+            // método no disponible -> fallback
+        }
+
+        // fallback conocido: flushIOBuffers
         try {
             port.flushIOBuffers();
+            if (debug) System.out.println("ScaleService: safePurge -> flushIOBuffers used");
         } catch (Throwable ignored) {}
-        // small drain from InputStream if available
-        if (in != null) {
+
+        // intento extra: forzar clear/invertir líneas de control para reset rápido del adaptador
+        try {
+            port.clearDTR();
+            port.clearRTS();
+            sleep(40);
+            port.setDTR();
+            port.setRTS();
+            sleep(40);
+            if (debug) System.out.println("ScaleService: safePurge -> toggled DTR/RTS");
+        } catch (Throwable ignored) {}
+    }
+
+    /**
+     * Intenta forzar la liberación del puerto a nivel driver creando
+     * instancias alternativas y abriéndolas/cerrándolas varias veces.
+     * Esto ayuda cuando el OS mantiene handles nativos entre close() y
+     * un nuevo open().
+     */
+    private void forceReleasePort(String portName) {
+        if (portName == null || portName.isBlank()) return;
+        for (int k = 0; k < 4; k++) {
             try {
-                byte[] tmp = new byte[256];
-                long deadline = System.currentTimeMillis() + 200;
-                while (System.currentTimeMillis() < deadline) {
-                    int avail = 0;
-                    try { avail = in.available(); } catch (IOException ignored) {}
-                    if (avail <= 0) { sleep(20); continue; }
-                    int r = in.read(tmp, 0, Math.min(tmp.length, avail));
-                    if (r <= 0) break;
+                SerialPort alt = SerialPort.getCommPort(portName);
+                try {
+                    // intentos de purge/close rápidos para forzar liberación
+                    try { alt.flushIOBuffers(); } catch (Throwable ignored) {}
+                    try { alt.clearDTR(); alt.clearRTS(); } catch (Throwable ignored) {}
+                    try { alt.closePort(); } catch (Throwable ignored) {}
+                    // abrir y cerrar rápidamente
+                    try {
+                        if (alt.openPort(350)) {
+                            sleep(80);
+                            try { alt.clearDTR(); alt.clearRTS(); } catch (Throwable ignored) {}
+                            try { alt.flushIOBuffers(); } catch (Throwable ignored) {}
+                            try { alt.closePort(); } catch (Throwable ignored) {}
+                        }
+                    } catch (Throwable ignored) {}
+                } finally {
+                    try { alt.closePort(); } catch (Throwable ignored) {}
                 }
-            } catch (Throwable ignored) {}
+            } catch (Throwable t) {
+                if (debug) System.err.println("ScaleService: forceReleasePort iteration " + k + " failed: " + t.getMessage());
+            }
+            // pequeño margen entre intentos
+            sleep(120 + k * 60);
         }
+        // margen final para que el driver procese la liberación
+        sleep(180);
     }
 
     private void sleep(long ms) {
